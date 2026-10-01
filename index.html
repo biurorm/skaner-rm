@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Blokada: strona nie może niczego wysłać poza własny adres, nie ładuje obcych skryptów -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#094d47">
+  <title>Skaner, RM Nieruchomości</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="header-left">
+      <img src="logo.png" alt="RM Nieruchomości" class="header-logo">
+      <div class="subtitle">Skaner</div>
+    </div>
+    <div class="header-right">
+      <span class="wersja" data-wersja=""></span>
+      <button class="icon-btn" id="info-btn" aria-label="Bezpieczeństwo">🔒</button>
+    </div>
+  </header>
+
+  <!-- LISTA STRON -->
+  <section class="screen active" id="ekran-lista">
+    <div class="pasek-bezp">🔒 Zdjęcia zostają w tym telefonie. Nic nie jest wysyłane.</div>
+
+    <div class="tryb-box">
+      <div class="etykieta">Jakość dla nowych stron</div>
+      <div class="chips" id="tryb-domyslny"></div>
+      <button class="link-btn" id="tryb-wszystkie" hidden>Zastosuj do wszystkich stron</button>
+    </div>
+
+    <div class="pusto" id="pusto">
+      <div class="pusto-ikona">📄</div>
+      <p><b>Zrób zdjęcie pierwszej strony.</b></p>
+      <p class="hint">Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem. Rogi, prostowanie i poprawa jakości dzieją się same. Kadr poprawisz palcem.</p>
+    </div>
+
+    <div class="siatka" id="siatka"></div>
+  </section>
+
+  <!-- EDYTOR KADRU -->
+  <section class="screen" id="ekran-edytor">
+    <div class="edytor-gora">
+      <button class="btn" id="ed-anuluj">← Wróć</button>
+      <span class="ed-tytul" id="ed-tytul">Strona</span>
+      <button class="btn-primary" id="ed-zapisz">Gotowe</button>
+    </div>
+    <div class="ed-pole" id="ed-pole">
+      <canvas id="ed-obraz"></canvas>
+      <svg id="ed-ramka" class="ed-ramka"><polygon id="ed-wielokat"></polygon></svg>
+      <div class="rog" data-i="0"></div><div class="rog" data-i="1"></div><div class="rog" data-i="2"></div><div class="rog" data-i="3"></div>
+      <canvas id="lupa" class="lupa" width="132" height="132" hidden></canvas>
+    </div>
+    <p class="hint centr">Przeciągnij zielone kółka na rogi kartki.</p>
+    <div class="ed-przyciski">
+      <button class="btn" id="ed-wykryj">✨ Wykryj rogi</button>
+      <button class="btn" id="ed-calosc">⛶ Całe zdjęcie</button>
+      <button class="btn" id="ed-lewo" aria-label="Obróć w lewo">↺</button>
+      <button class="btn" id="ed-prawo" aria-label="Obróć w prawo">↻</button>
+    </div>
+    <div class="etykieta">Jakość tej strony</div>
+    <div class="chips" id="ed-tryb"></div>
+    <div class="ed-podglad-box">
+      <div class="etykieta">Podgląd</div>
+      <img id="ed-podglad" alt="Podgląd strony">
+    </div>
+  </section>
+
+  <!-- ZAPIS PDF -->
+  <section class="screen" id="ekran-zapis">
+    <div class="card">
+      <div class="card-title">Zapisz jako PDF</div>
+      <label>Nazwa pliku
+        <input type="text" id="z-nazwa" autocomplete="off" autocapitalize="sentences">
+      </label>
+      <label class="przelacznik">
+        <input type="checkbox" id="z-haslo-wl">
+        <span>Zabezpiecz hasłem (AES-256)</span>
+      </label>
+      <div id="z-haslo-box" hidden>
+        <label>Hasło
+          <input type="password" id="z-haslo1" autocomplete="new-password">
+        </label>
+        <label>Powtórz hasło
+          <input type="password" id="z-haslo2" autocomplete="new-password">
+        </label>
+        <label class="przelacznik maly"><input type="checkbox" id="z-pokaz"> <span>Pokaż hasło</span></label>
+        <p class="hint">Bez hasła pliku nie otworzy nikt, także Ty. Hasła nigdzie nie zapisuję. Przekaż je klientowi innym kanałem niż plik (plik mailem, hasło SMS-em).</p>
+      </div>
+      <p class="blad" id="z-blad" hidden></p>
+      <button class="btn-primary wide" id="z-utworz">📄 Utwórz PDF</button>
+      <button class="btn wide" id="z-wroc">← Wróć do stron</button>
+    </div>
+
+    <div class="card" id="z-gotowe" hidden>
+      <div class="card-title">✅ PDF gotowy</div>
+      <p id="z-opis"></p>
+      <button class="btn-primary wide" id="z-udostepnij">📤 Zapisz w Plikach / wyślij</button>
+      <button class="btn wide" id="z-pobierz">⬇️ Pobierz plik</button>
+      <button class="btn danger wide" id="z-wyczysc">🗑 Wyczyść skany i zacznij nowy</button>
+    </div>
+  </section>
+
+  <!-- BEZPIECZEŃSTWO -->
+  <section class="screen" id="ekran-info">
+    <div class="card">
+      <div class="card-title">🔒 Jak chronione są skany</div>
+      <ul class="lista-info">
+        <li><b>Nic nie opuszcza telefonu.</b> Kadrowanie, prostowanie, poprawa jakości i składanie PDF dzieją się w tym urządzeniu. Nie ma serwera, konta ani chmury.</li>
+        <li><b>Twarda blokada sieci.</b> Strona ma wbudowany zakaz łączenia się z jakimkolwiek innym adresem i ładowania obcych skryptów. Nawet błąd w kodzie nie wyśle zdjęcia.</li>
+        <li><b>Zero bibliotek z zewnątrz.</b> Cały kod jest nasz, mały i do sprawdzenia.</li>
+        <li><b>Nic się nie zapisuje.</b> Zdjęcia są tylko w pamięci, do zamknięcia aplikacji albo do przycisku „Wyczyść”. Nie trafiają do galerii, jeśli robisz je przyciskiem „Zrób zdjęcie”.</li>
+        <li><b>Hasło AES-256.</b> To samo szyfrowanie co w Adobe Acrobat. Bez hasła pliku nie da się otworzyć.</li>
+        <li><b>Czysty plik.</b> PDF nie zawiera daty, autora, lokalizacji ani nazwy programu.</li>
+      </ul>
+      <p class="hint">Najsłabszym ogniwem jest to, gdzie trafi gotowy PDF. Akt z PESEL-ami zapisuj w folderze klienta w OneDrive, nie wysyłaj Messengerem ani WhatsAppem bez hasła.</p>
+      <button class="btn wide" id="info-wroc">← Wróć</button>
+    </div>
+  </section>
+
+  <!-- DOLNY PASEK -->
+  <div class="dol" id="dol">
+    <button class="btn-aparat" id="btn-aparat">📷 Skanuj</button>
+    <button class="btn" id="btn-galeria">🖼 Galeria</button>
+    <button class="btn-primary" id="btn-pdf" disabled>📄 PDF</button>
+  </div>
+
+  <input type="file" id="in-aparat" accept="image/*" capture="environment" hidden>
+  <input type="file" id="in-galeria" accept="image/*" multiple hidden>
+
+  <div class="toast" id="toast" hidden></div>
+  <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
+</div>
+<script src="skan.js?v=1"></script>
+<script src="pdf-rm.js?v=1"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>
