@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 2;
+const WERSJA = 3;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -85,6 +85,20 @@ async function przelicz(s, zrodloCanvas) {
   zwolnij(wynik); zwolnij(m);
 }
 
+// nowa strona z płótna zdjęcia; hint = rogi z podglądu na żywo (to, co Rafał widział na ekranie)
+async function dodajStrone(zr, hint) {
+  // z podglądu: ramka już znaleziona, tylko dociągamy ją do krawędzi w pełnej rozdzielczości (szybko)
+  const rogi = hint ? Skan.dociagnij(zr, hint) : Skan.wykryj(zr);
+  const s = {
+    id: ++licznikId, zrodlo: await Skan.doBloba(zr, 'image/jpeg', 0.92),
+    rogi: rogi || Skan.PELNY, wykryto: !!rogi, tryb: stan.tryb, obrot: 0, wybrana: true
+  };
+  await przelicz(s, zr);
+  stan.strony.push(s);
+  zmiana();
+  return s;
+}
+
 async function dodajPliki(pliki) {
   pliki = Array.from(pliki || []).filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.name));
   if (!pliki.length) return;
@@ -94,14 +108,8 @@ async function dodajPliki(pliki) {
     await oddech();
     try {
       const zr = await Skan.wczytaj(pliki[i]);
-      const rogi = Skan.wykryj(zr);
-      const s = {
-        id: ++licznikId, zrodlo: await Skan.doBloba(zr, 'image/jpeg', 0.92),
-        rogi: rogi || Skan.PELNY, wykryto: !!rogi, tryb: stan.tryb, obrot: 0, wybrana: true
-      };
-      await przelicz(s, zr);
+      await dodajStrone(zr);
       zwolnij(zr);
-      stan.strony.push(s);
     } catch (e) {
       nieudane++;
     }
@@ -119,7 +127,9 @@ function rysujListe() {
   const n = stan.strony.length, k = wybrane().length;
   $('#pusto').hidden = n > 0;
   $('#btn-pdf').disabled = k === 0;
-  $('#btn-pdf').textContent = n ? `💾 Zapisz (${k})` : '💾 Zapisz';
+  $('#btn-jpg').disabled = k === 0;
+  $('#btn-pdf').textContent = n ? `📄 PDF ${k}` : '📄 PDF';
+  $('#btn-jpg').textContent = n ? `🖼 JPG ${k}` : '🖼 JPG';
   $('#tryb-wszystkie').hidden = n === 0;
   $('#wybor').hidden = n === 0;
   $('#wybor-hint').hidden = n === 0;
@@ -408,7 +418,7 @@ $('#z-utworz').addEventListener('click', async () => {
       stan.pliki = [new File([blob], baza + '.pdf', { type: 'application/pdf' })];
     } else {
       // numer w nazwie = numer strony z listy, pliki układają się w folderze po kolei
-      stan.pliki = strony.map((s) => new File([s.wynik], `${baza} - str ${nr2(stan.strony.indexOf(s) + 1)}.jpg`, { type: 'image/jpeg' }));
+      stan.pliki = plikiJpg(baza);
     }
   } catch (e) {
     zaslona(null);
@@ -434,13 +444,7 @@ $('#z-udostepnij').addEventListener('click', async () => {
 
 $('#z-pobierz').addEventListener('click', async () => {
   if (!stan.pliki) return;
-  for (const f of stan.pliki) {
-    const url = URL.createObjectURL(f), a = document.createElement('a');
-    a.href = url; a.download = f.name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    if (stan.pliki.length > 1) await new Promise((r) => setTimeout(r, 400)); // przeglądarka łapie pliki po kolei
-  }
+  await pobierzPliki(stan.pliki);
   stan.zapisano = true;
 });
 
@@ -460,11 +464,190 @@ $('#z-wyczysc').addEventListener('click', () => {
 });
 $('#z-wroc').addEventListener('click', () => pokaz('lista'));
 
+// ---------- SKANOWANIE NA ŻYWO ----------
+// Podgląd z aparatu w aplikacji: kartka szukana kilka razy na sekundę i obrysowana na zielono.
+// Gdy ramka stoi nieruchomo ok. 1 s, zdjęcie robi się samo. Kolejna strona dopiero po zmianie kartki.
+// Obraz z aparatu nie opuszcza telefonu, jak wszystko inne w tej aplikacji.
+
+const Kamera = (() => {
+  const STABILNIE_MS = 900;   // tyle ramka musi stać w miejscu przed auto-zdjęciem
+  const RUCH = 0.02;          // dopuszczalne drganie rogu między klatkami (ułamek kadru)
+  let strumien = null, petlaT = null, zajety = false;
+  let ramka = null, stabilnaOd = 0, uzbrojony = true, brakOd = 0, wzorzec = null;
+  let auto = true;
+  try { auto = localStorage.getItem('rm-skaner-auto') !== '0'; } catch (e) {}
+  const video = $('#kam-video'), maly = document.createElement('canvas');
+
+  const dostepna = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+  async function otworz() {
+    if (!dostepna()) { $('#in-aparat').click(); return; }
+    pokaz('kamera');
+    status('Uruchamiam aparat…');
+    try {
+      strumien = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 4032 }, height: { ideal: 3024 } }
+      });
+    } catch (e) {
+      zamknij();
+      toast('Brak dostępu do aparatu. Otwieram zwykły aparat.', 3000);
+      $('#in-aparat').click();
+      return;
+    }
+    video.srcObject = strumien;
+    try { await video.play(); } catch (e) {}
+    await new Promise((r) => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
+    $('#kam-pole').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    ramka = null; stabilnaOd = 0; uzbrojony = true; brakOd = 0; wzorzec = null;
+    rysujAuto(); licznik();
+    petla();
+  }
+
+  function zamknij() {
+    clearTimeout(petlaT); petlaT = null;
+    if (strumien) strumien.getTracks().forEach((t) => t.stop());
+    strumien = null; video.srcObject = null;
+    pokaz('lista');
+    rysujListe();
+  }
+
+  function status(t, ok) {
+    const el = $('#kam-status'); el.textContent = t; el.classList.toggle('ok', !!ok);
+  }
+
+  function licznik() {
+    const n = stan.strony.length;
+    $('#kam-gotowe').textContent = n ? `Gotowe (${n})` : 'Gotowe';
+  }
+
+  function rysujAuto() {
+    $('#kam-auto').textContent = auto ? 'Auto: wł.' : 'Auto: wył.';
+    $('#kam-auto').classList.toggle('on', auto);
+  }
+
+  function rysujRamke(q, postep) {
+    const w = $('#kam-wielokat');
+    if (!q) { w.setAttribute('points', ''); return; }
+    w.setAttribute('points', q.map(([x, y]) => `${x},${y}`).join(' '));
+    w.style.fill = `rgba(34,197,94,${0.12 + 0.3 * (postep || 0)})`;
+  }
+
+  // mała szara miniatura kadru: po niej poznajemy, że pod aparatem leży już inna kartka
+  function odcisk(c) {
+    const m = document.createElement('canvas'); m.width = 24; m.height = 24;
+    const x = m.getContext('2d', { willReadFrequently: true }); x.drawImage(c, 0, 0, 24, 24);
+    const d = x.getImageData(0, 0, 24, 24).data, o = new Float32Array(576);
+    for (let i = 0; i < 576; i++) o[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3;
+    return o;
+  }
+  const roznica = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; };
+
+  function petla() {
+    if (!strumien) return;
+    if (!zajety && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight, s = 480 / Math.max(vw, vh);
+      maly.width = Math.round(vw * s); maly.height = Math.round(vh * s);
+      maly.getContext('2d', { willReadFrequently: true }).drawImage(video, 0, 0, maly.width, maly.height);
+      let r = null;
+      try { r = Skan.wykryj(maly, true); } catch (e) {}
+      const teraz = performance.now();
+
+      // ponowne uzbrojenie auto-zdjęcia: kartka zniknęła z kadru albo leży już inna
+      if (!uzbrojony) {
+        if (!r) { if (!brakOd) brakOd = teraz; if (teraz - brakOd > 400) uzbrojony = true; } else brakOd = 0;
+        if (!uzbrojony && wzorzec && roznica(odcisk(maly), wzorzec) > 14) uzbrojony = true;
+      }
+
+      if (r) {
+        const ruch = ramka ? Math.max(...r.map((p, i) => Math.hypot(p[0] - ramka[i][0], p[1] - ramka[i][1]))) : 1;
+        if (ruch > RUCH) stabilnaOd = teraz;
+        // wygładzanie: ramka nie skacze między klatkami
+        ramka = ramka && ruch < 0.08 ? r.map((p, i) => [ramka[i][0] * 0.5 + p[0] * 0.5, ramka[i][1] * 0.5 + p[1] * 0.5]) : r;
+        const postep = Math.min(1, (teraz - stabilnaOd) / STABILNIE_MS);
+        rysujRamke(ramka, auto && uzbrojony ? postep : 0);
+        if (!uzbrojony) status('Strona zapisana. Połóż następną kartkę.', true);
+        else if (auto) status(postep < 1 ? 'Mam kartkę. Nie ruszaj telefonem…' : 'Robię zdjęcie…', true);
+        else status('Mam kartkę. Naciśnij spust.', true);
+        if (auto && uzbrojony && postep >= 1) { pstryk(); }
+      } else {
+        ramka = null; stabilnaOd = teraz;
+        rysujRamke(null);
+        status(uzbrojony ? 'Szukam kartki… Połóż ją na ciemniejszym blacie, całą w kadrze.' : 'Strona zapisana. Połóż następną kartkę.');
+      }
+    }
+    petlaT = setTimeout(petla, 70);
+  }
+
+  async function pstryk() {
+    if (!strumien || zajety || !video.videoWidth) return;
+    zajety = true;
+    const hint = ramka && ramka.map((p) => p.slice());
+    const vw = video.videoWidth, vh = video.videoHeight, sk = Math.min(1, 3000 / Math.max(vw, vh));
+    const zr = Skan.plotno(vw * sk, vh * sk);
+    const ctx = zr.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(video, 0, 0, zr.width, zr.height);
+    $('#kam-blysk').classList.remove('blysk'); void $('#kam-blysk').offsetWidth; $('#kam-blysk').classList.add('blysk');
+    if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {}
+    uzbrojony = false; brakOd = 0; wzorzec = odcisk(zr);
+    status('Zapisuję stronę…', true);
+    await oddech();
+    try {
+      await dodajStrone(zr, hint);
+      const s = stan.strony[stan.strony.length - 1];
+      $('#kam-mini').src = s.mini; $('#kam-mini').hidden = false;
+      licznik();
+      toast(`Strona ${stan.strony.length} zapisana`, 1200);
+    } catch (e) {
+      toast('Nie udało się zapisać strony. Spróbuj jeszcze raz.');
+      uzbrojony = true;
+    }
+    zwolnij(zr);
+    zajety = false;
+  }
+
+  $('#kam-spust').addEventListener('click', () => { uzbrojony = true; pstryk(); });
+  $('#kam-gotowe').addEventListener('click', zamknij);
+  $('#kam-auto').addEventListener('click', () => {
+    auto = !auto; rysujAuto();
+    try { localStorage.setItem('rm-skaner-auto', auto ? '1' : '0'); } catch (e) {}
+  });
+  $('#kam-systemowy').addEventListener('click', () => { zamknij(); $('#in-aparat').click(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && strumien) zamknij(); });
+
+  return { otworz, dostepna };
+})();
+
+// JPG jednym dotknięciem: od razu arkusz udostępniania iPhone'a ("Zapisz obrazy" = do Zdjęć)
+function plikiJpg(baza) {
+  return wybrane().map((s) => new File([s.wynik], `${baza} - str ${nr2(stan.strony.indexOf(s) + 1)}.jpg`, { type: 'image/jpeg' }));
+}
+
+async function pobierzPliki(pliki) {
+  for (const f of pliki) {
+    const url = URL.createObjectURL(f), a = document.createElement('a');
+    a.href = url; a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (pliki.length > 1) await new Promise((r) => setTimeout(r, 400)); // przeglądarka łapie pliki po kolei
+  }
+}
+
+$('#btn-jpg').addEventListener('click', () => {
+  if (!wybrane().length) return toast('Zaznacz co najmniej jedną stronę.');
+  const pliki = plikiJpg(domyslnaNazwa());
+  // share() musi pójść od razu w kliknięciu, bez czekania, inaczej iPhone go zablokuje
+  if (navigator.canShare && navigator.canShare({ files: pliki })) {
+    navigator.share({ files: pliki }).then(() => { stan.zapisano = true; toast('Zapisano'); }).catch(() => {});
+  } else {
+    pobierzPliki(pliki).then(() => { stan.zapisano = true; });
+  }
+});
+
 // ---------- PRZYCISKI GŁÓWNE ----------
 
-$('#btn-aparat').addEventListener('click', () => $('#in-aparat').click());
+$('#btn-aparat').addEventListener('click', () => Kamera.otworz());
 $('#btn-galeria').addEventListener('click', () => $('#in-galeria').click());
-$('#btn-pdf').addEventListener('click', otworzZapis);
+$('#btn-pdf').addEventListener('click', () => { stan.format = 'pdf'; otworzZapis(); });
 $('#in-aparat').addEventListener('change', async (e) => { await dodajPliki(e.target.files); e.target.value = ''; });
 $('#in-galeria').addEventListener('change', async (e) => { await dodajPliki(e.target.files); e.target.value = ''; });
 $('#info-btn').addEventListener('click', () => pokaz('info'));

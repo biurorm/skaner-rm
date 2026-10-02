@@ -7,6 +7,7 @@ const Skan = (() => {
   const MAX_ZRODLO = 3000;   // dłuższy bok zdjęcia trzymanego w pamięci
   const MAX_WYNIK = 2339;    // dłuższy bok strony wynikowej (A4 przy 200 dpi)
   const DET = 640;           // rozdzielczość robocza wykrywania rogów
+  const DET_SZYBKO = 360;    // to samo na żywo z aparatu (kilka razy na sekundę)
 
   function plotno(w, h) {
     const c = document.createElement('canvas');
@@ -246,7 +247,7 @@ const Skan = (() => {
   }
 
   // ---- proste linie na zdjęciu (transformata Hougha z kierunkiem gradientu) ----
-  function linie(g, w, h) {
+  function linie(g, w, h, ile = 24) {
     const gx = new Float32Array(w * h), gy = new Float32Array(w * h), mag = new Float32Array(w * h);
     for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
@@ -270,7 +271,7 @@ const Skan = (() => {
       }
     }
     const wynik = [], minGlos = 0.12 * Math.min(w, h);
-    for (let k = 0; k < 24; k++) {
+    for (let k = 0; k < ile; k++) {
       let m = 0, mi = -1;
       for (let i = 0; i < acc.length; i++) if (acc[i] > m) { m = acc[i]; mi = i; }
       if (mi < 0 || m < minGlos) break;
@@ -312,8 +313,9 @@ const Skan = (() => {
   }
 
   // zwraca 4 rogi w ułamkach (0..1) albo null, gdy kartki nie widać wyraźnie
-  function wykryj(zrodlo) {
-    const s = Math.min(1, DET / Math.max(zrodlo.width, zrodlo.height));
+  // szybko = tryb podglądu na żywo z aparatu: mniejsza rozdzielczość, same proste krawędzie, bez dociągania
+  function wykryj(zrodlo, szybko = false) {
+    const s = Math.min(1, (szybko ? DET_SZYBKO : DET) / Math.max(zrodlo.width, zrodlo.height));
     const w = Math.max(8, Math.round(zrodlo.width * s)), h = Math.max(8, Math.round(zrodlo.height * s));
     const c = plotno(w, h), ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(zrodlo, 0, 0, w, h);
@@ -330,47 +332,50 @@ const Skan = (() => {
     const dodaj = (q) => { if (q) { const o = wynikQ(g, w, h, q); if (o) kand.push(o); } };
 
     // A) proste krawędzie: czworokąty z 4 linii, główna metoda (radzi sobie z kartką leżącą na innej kartce)
-    try { kand.push(...zLinii(linie(rozmyj(jas, w, h, 2), w, h), w, h, g)); } catch (e) {}
+    try { kand.push(...zLinii(linie(rozmyj(jas, w, h, 2), w, h, szybko ? 14 : 24), w, h, g)); } catch (e) {}
 
-    // B) kartka jaśniejsza od tła; mocniejsze otwarcie rozcina kartki, które się stykają
-    const pr = rozmyj(pap, w, h, 2), prog = otsu(pr);
-    const m0 = new Uint8Array(w * h);
-    for (let i = 0; i < m0.length; i++) m0[i] = pr[i] > prog ? 1 : 0;
-    for (const r of [2, 5, 9]) dodaj(zMaski(morf(morf(m0, w, h, r, false), w, h, r, true), w, h));
+    if (!szybko) {
+      // B) kartka jaśniejsza od tła; mocniejsze otwarcie rozcina kartki, które się stykają
+      const pr = rozmyj(pap, w, h, 2), prog = otsu(pr);
+      const m0 = new Uint8Array(w * h);
+      for (let i = 0; i < m0.length; i++) m0[i] = pr[i] > prog ? 1 : 0;
+      for (const r of [2, 5, 9]) dodaj(zMaski(morf(morf(m0, w, h, r, false), w, h, r, true), w, h));
 
-    // C) krawędzie: wszystko, czego nie da się "zalać" od brzegu zdjęcia, jest kartką
-    const mag = new Float32Array(w * h);
-    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      const gx = g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - 1] - g[i + w - 1];
-      const gy = g[i + w - 1] + 2 * g[i + w] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - w] - g[i - w + 1];
-      mag[i] = Math.hypot(gx, gy);
-    }
-    for (const pc of [0.8, 0.88, 0.94]) {
-      const t = Math.max(18, percentyl(mag, pc));
-      for (const r of [1, 2]) {
-        let kr = new Uint8Array(w * h);
-        for (let i = 0; i < kr.length; i++) kr[i] = mag[i] > t ? 1 : 0;
-        kr = morf(kr, w, h, r, true);
-        const tlo = new Uint8Array(w * h), stos = new Int32Array(w * h); let sp = 0;
-        const zalej = (p) => { if (!kr[p] && !tlo[p]) { tlo[p] = 1; stos[sp++] = p; } };
-        for (let x = 0; x < w; x++) { zalej(x); zalej((h - 1) * w + x); }
-        for (let y = 0; y < h; y++) { zalej(y * w); zalej(y * w + w - 1); }
-        while (sp) {
-          const p = stos[--sp], x = p % w, y = (p / w) | 0;
-          if (x > 0) zalej(p - 1); if (x < w - 1) zalej(p + 1);
-          if (y > 0) zalej(p - w); if (y < h - 1) zalej(p + w);
+      // C) krawędzie: wszystko, czego nie da się "zalać" od brzegu zdjęcia, jest kartką
+      const mag = new Float32Array(w * h);
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const gx = g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - 1] - g[i + w - 1];
+        const gy = g[i + w - 1] + 2 * g[i + w] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - w] - g[i - w + 1];
+        mag[i] = Math.hypot(gx, gy);
+      }
+      for (const pc of [0.8, 0.88, 0.94]) {
+        const t = Math.max(18, percentyl(mag, pc));
+        for (const r of [1, 2]) {
+          let kr = new Uint8Array(w * h);
+          for (let i = 0; i < kr.length; i++) kr[i] = mag[i] > t ? 1 : 0;
+          kr = morf(kr, w, h, r, true);
+          const tlo = new Uint8Array(w * h), stos = new Int32Array(w * h); let sp = 0;
+          const zalej = (p) => { if (!kr[p] && !tlo[p]) { tlo[p] = 1; stos[sp++] = p; } };
+          for (let x = 0; x < w; x++) { zalej(x); zalej((h - 1) * w + x); }
+          for (let y = 0; y < h; y++) { zalej(y * w); zalej(y * w + w - 1); }
+          while (sp) {
+            const p = stos[--sp], x = p % w, y = (p / w) | 0;
+            if (x > 0) zalej(p - 1); if (x < w - 1) zalej(p + 1);
+            if (y > 0) zalej(p - w); if (y < h - 1) zalej(p + w);
+          }
+          let wn = new Uint8Array(w * h);
+          for (let i = 0; i < wn.length; i++) wn[i] = tlo[i] ? 0 : 1;
+          wn = morf(wn, w, h, r, false); // zdejmujemy grubość dorysowanej krawędzi
+          dodaj(zMaski(wn, w, h));
         }
-        let wn = new Uint8Array(w * h);
-        for (let i = 0; i < wn.length; i++) wn[i] = tlo[i] ? 0 : 1;
-        wn = morf(wn, w, h, r, false); // zdejmujemy grubość dorysowanej krawędzi
-        dodaj(zMaski(wn, w, h));
       }
     }
 
     const best = kand.sort((a, b) => b.wynik - a.wynik)[0];
     if (!best || best.sr < 0.55) return null;
     const rogi = best.q.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
+    if (szybko) return rogi;
     try { return dopracuj(zrodlo, rogi); } catch (e) { return rogi; }
   }
 
@@ -600,5 +605,8 @@ const Skan = (() => {
     return m;
   }
 
-  return { wczytaj, wykryj, przetworz, miniatura, doBloba, plotno, PELNY };
+  // dociągnięcie rogów z podglądu na żywo do pełnego zdjęcia (szybkie, bez ponownego szukania)
+  function dociagnij(zrodlo, rogi) { try { return dopracuj(zrodlo, rogi); } catch (e) { return rogi; } }
+
+  return { wczytaj, wykryj, dociagnij, przetworz, miniatura, doBloba, plotno, PELNY };
 })();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <!-- Blokada: strona nie może niczego wysłać poza własny adres, nie ładuje obcych skryptów -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob: mediastream:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#094d47">
@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div class="app">
@@ -44,7 +44,7 @@
     <div class="pusto" id="pusto">
       <div class="pusto-ikona">📄</div>
       <p><b>Zrób zdjęcie pierwszej strony.</b></p>
-      <p class="hint">Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem. Rogi, prostowanie i poprawa jakości dzieją się same. Kadr poprawisz palcem.</p>
+      <p class="hint">Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem. Zielona ramka pokaże kartkę jeszcze przed zdjęciem, a gdy przestaniesz ruszać telefonem, zdjęcie zrobi się samo. Prostowanie i poprawa jakości dzieją się same. Kadr poprawisz palcem.</p>
     </div>
 
     <div class="wybor" id="wybor" hidden>
@@ -54,6 +54,29 @@
     <p class="hint wybor-hint" id="wybor-hint" hidden>Kółko ✓ w rogu strony: zaznacz albo odznacz. Do pliku idą tylko zaznaczone, w kolejności numerów.</p>
 
     <div class="siatka" id="siatka"></div>
+  </section>
+
+  <!-- SKANOWANIE NA ŻYWO -->
+  <section class="screen kamera" id="ekran-kamera">
+    <div class="kam-status" id="kam-status">Uruchamiam aparat…</div>
+    <div class="kam-srodek">
+      <div class="kam-pole" id="kam-pole">
+        <video id="kam-video" playsinline muted autoplay></video>
+        <svg class="kam-ramka" viewBox="0 0 1 1" preserveAspectRatio="none"><polygon id="kam-wielokat"></polygon></svg>
+        <div class="kam-blysk" id="kam-blysk"></div>
+      </div>
+    </div>
+    <div class="kam-dol">
+      <div class="kam-lewa">
+        <img id="kam-mini" class="kam-mini" alt="Ostatnia strona" hidden>
+        <button class="kam-maly" id="kam-auto">Auto: wł.</button>
+      </div>
+      <button class="kam-spust" id="kam-spust" aria-label="Zrób zdjęcie"></button>
+      <div class="kam-prawa">
+        <button class="kam-gotowe" id="kam-gotowe">Gotowe</button>
+        <button class="kam-maly" id="kam-systemowy">Zwykły aparat</button>
+      </div>
+    </div>
   </section>
 
   <!-- EDYTOR KADRU -->
@@ -135,7 +158,7 @@
         <li><b>Nic nie opuszcza telefonu.</b> Kadrowanie, prostowanie, poprawa jakości i składanie PDF dzieją się w tym urządzeniu. Nie ma serwera, konta ani chmury.</li>
         <li><b>Twarda blokada sieci.</b> Strona ma wbudowany zakaz łączenia się z jakimkolwiek innym adresem i ładowania obcych skryptów. Nawet błąd w kodzie nie wyśle zdjęcia.</li>
         <li><b>Zero bibliotek z zewnątrz.</b> Cały kod jest nasz, mały i do sprawdzenia.</li>
-        <li><b>Nic się nie zapisuje.</b> Zdjęcia są tylko w pamięci, do zamknięcia aplikacji albo do przycisku „Wyczyść”. Nie trafiają do galerii, jeśli robisz je przyciskiem „Zrób zdjęcie”.</li>
+        <li><b>Nic się nie zapisuje.</b> Zdjęcia są tylko w pamięci, do zamknięcia aplikacji albo do przycisku „Wyczyść”. Nie trafiają do galerii, jeśli skanujesz przyciskiem „Skanuj”. Obraz z aparatu analizowany na żywo też nie opuszcza telefonu.</li>
         <li><b>Hasło AES-256.</b> To samo szyfrowanie co w Adobe Acrobat. Bez hasła pliku nie da się otworzyć. Hasło działa tylko w PDF, zapis do JPG jest bez hasła.</li>
         <li><b>Czysty plik.</b> PDF nie zawiera daty, autora, lokalizacji ani nazwy programu.</li>
       </ul>
@@ -147,8 +170,9 @@
   <!-- DOLNY PASEK -->
   <div class="dol" id="dol">
     <button class="btn-aparat" id="btn-aparat">📷 Skanuj</button>
-    <button class="btn" id="btn-galeria">🖼 Galeria</button>
-    <button class="btn-primary" id="btn-pdf" disabled>💾 Zapisz</button>
+    <button class="btn" id="btn-galeria">➕ Galeria</button>
+    <button class="btn-primary" id="btn-pdf" disabled>📄 PDF</button>
+    <button class="btn-primary" id="btn-jpg" disabled>🖼 JPG</button>
   </div>
 
   <input type="file" id="in-aparat" accept="image/*" capture="environment" hidden>
@@ -157,8 +181,8 @@
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=2"></script>
-<script src="pdf-rm.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="skan.js?v=3"></script>
+<script src="pdf-rm.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
