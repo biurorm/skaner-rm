@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 3;
+const WERSJA = 4;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -161,9 +161,8 @@ function rysujListe() {
         <button data-a="prawo" aria-label="Przesuń dalej" ${i === n - 1 ? 'disabled' : ''}>▶</button>
       </div>`;
     el.querySelector('img').src = s.mini;
-    el.querySelector('.strona-obraz').addEventListener('click', () => otworzEdytor(s));
-    el.querySelector('.strona-check').addEventListener('click', (e) => {
-      e.stopPropagation();
+    // dotknięcie strony = zaznacz / odznacz; kadr poprawia się nożyczkami ✂️
+    el.querySelector('.strona-obraz').addEventListener('click', () => {
       s.wybrana = !s.wybrana;
       zmiana(); rysujListe();
     });
@@ -672,3 +671,22 @@ if ('serviceWorker' in navigator) {
     przeladowano = true; location.reload();
   });
 }
+
+// iPhone trzyma aplikację z ekranu głównego w pamięci całymi dniami i nie wczytuje nowej wersji sam.
+// Przy każdym powrocie do aplikacji sprawdzamy numer wersji na serwerze; bez stron odświeżamy od razu,
+// ze stronami pokazujemy pasek, żeby skany nie przepadły bez pytania.
+async function sprawdzWersje() {
+  try {
+    const t = await (await fetch('app.js?spr=' + Date.now(), { cache: 'no-store' })).text();
+    const m = t.match(/const WERSJA = (\d+);/);
+    if (!m || +m[1] <= WERSJA) return;
+    if (!stan.strony.length) { location.reload(); return; }
+    $('#aktualizacja').hidden = false;
+  } catch (e) { /* brak zasięgu */ }
+}
+$('#aktualizacja-btn').addEventListener('click', () => {
+  if (stan.strony.length && !stan.zapisano && !confirm('Odświeżenie usunie zeskanowane strony. Zapisz je najpierw jako PDF albo JPG. Odświeżyć mimo to?')) return;
+  stan.zapisano = true; location.reload();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) sprawdzWersje(); });
+sprawdzWersje();

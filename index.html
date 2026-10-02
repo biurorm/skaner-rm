@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div class="app">
@@ -33,6 +33,10 @@
 
   <!-- LISTA STRON -->
   <section class="screen active" id="ekran-lista">
+    <div class="aktualizacja" id="aktualizacja" hidden>
+      <span>Jest nowa wersja skanera.</span>
+      <button class="btn-primary" id="aktualizacja-btn">Odśwież</button>
+    </div>
     <div class="pasek-bezp">🔒 Zdjęcia zostają w tym telefonie. Nic nie jest wysyłane.</div>
 
     <div class="tryb-box">
@@ -51,7 +55,7 @@
       <span id="wybor-tekst"></span>
       <button class="link-btn" id="wybor-wszystkie">Odznacz wszystkie</button>
     </div>
-    <p class="hint wybor-hint" id="wybor-hint" hidden>Kółko ✓ w rogu strony: zaznacz albo odznacz. Do pliku idą tylko zaznaczone, w kolejności numerów.</p>
+    <p class="hint wybor-hint" id="wybor-hint" hidden>Dotknij stronę, żeby ją zaznaczyć albo odznaczyć. Do pliku idą tylko zaznaczone ✓, w kolejności numerów. Kadr poprawisz nożyczkami ✂️.</p>
 
     <div class="siatka" id="siatka"></div>
   </section>
@@ -181,8 +185,8 @@
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=3"></script>
-<script src="pdf-rm.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="skan.js?v=4"></script>
+<script src="pdf-rm.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
