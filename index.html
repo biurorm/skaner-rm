@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -46,6 +46,12 @@
       <p><b>Zrób zdjęcie pierwszej strony.</b></p>
       <p class="hint">Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem. Rogi, prostowanie i poprawa jakości dzieją się same. Kadr poprawisz palcem.</p>
     </div>
+
+    <div class="wybor" id="wybor" hidden>
+      <span id="wybor-tekst"></span>
+      <button class="link-btn" id="wybor-wszystkie">Odznacz wszystkie</button>
+    </div>
+    <p class="hint wybor-hint" id="wybor-hint" hidden>Kółko ✓ w rogu strony: zaznacz albo odznacz. Do pliku idą tylko zaznaczone, w kolejności numerów.</p>
 
     <div class="siatka" id="siatka"></div>
   </section>
@@ -78,13 +84,19 @@
     </div>
   </section>
 
-  <!-- ZAPIS PDF -->
+  <!-- ZAPIS: PDF ALBO JPG -->
   <section class="screen" id="ekran-zapis">
     <div class="card">
-      <div class="card-title">Zapisz jako PDF</div>
+      <div class="card-title">Zapisz zaznaczone strony</div>
+      <div class="format">
+        <button class="format-btn" id="z-fmt-pdf"><b>📄 PDF</b><span>jeden plik</span></button>
+        <button class="format-btn" id="z-fmt-jpg"><b>🖼 JPG</b><span>osobne strony</span></button>
+      </div>
+      <p class="hint" id="z-fmt-opis"></p>
       <label>Nazwa pliku
         <input type="text" id="z-nazwa" autocomplete="off" autocapitalize="sentences">
       </label>
+      <div id="z-haslo-sekcja">
       <label class="przelacznik">
         <input type="checkbox" id="z-haslo-wl">
         <span>Zabezpiecz hasłem (AES-256)</span>
@@ -99,13 +111,15 @@
         <label class="przelacznik maly"><input type="checkbox" id="z-pokaz"> <span>Pokaż hasło</span></label>
         <p class="hint">Bez hasła pliku nie otworzy nikt, także Ty. Hasła nigdzie nie zapisuję. Przekaż je klientowi innym kanałem niż plik (plik mailem, hasło SMS-em).</p>
       </div>
+      </div>
+      <p class="uwaga-jpg" id="z-jpg-uwaga" hidden>JPG nie ma hasła. Akt albo umowę z PESEL-ami zapisuj jako PDF z hasłem.</p>
       <p class="blad" id="z-blad" hidden></p>
       <button class="btn-primary wide" id="z-utworz">📄 Utwórz PDF</button>
       <button class="btn wide" id="z-wroc">← Wróć do stron</button>
     </div>
 
     <div class="card" id="z-gotowe" hidden>
-      <div class="card-title">✅ PDF gotowy</div>
+      <div class="card-title" id="z-tytul-gotowe">✅ PDF gotowy</div>
       <p id="z-opis"></p>
       <button class="btn-primary wide" id="z-udostepnij">📤 Zapisz w Plikach / wyślij</button>
       <button class="btn wide" id="z-pobierz">⬇️ Pobierz plik</button>
@@ -122,7 +136,7 @@
         <li><b>Twarda blokada sieci.</b> Strona ma wbudowany zakaz łączenia się z jakimkolwiek innym adresem i ładowania obcych skryptów. Nawet błąd w kodzie nie wyśle zdjęcia.</li>
         <li><b>Zero bibliotek z zewnątrz.</b> Cały kod jest nasz, mały i do sprawdzenia.</li>
         <li><b>Nic się nie zapisuje.</b> Zdjęcia są tylko w pamięci, do zamknięcia aplikacji albo do przycisku „Wyczyść”. Nie trafiają do galerii, jeśli robisz je przyciskiem „Zrób zdjęcie”.</li>
-        <li><b>Hasło AES-256.</b> To samo szyfrowanie co w Adobe Acrobat. Bez hasła pliku nie da się otworzyć.</li>
+        <li><b>Hasło AES-256.</b> To samo szyfrowanie co w Adobe Acrobat. Bez hasła pliku nie da się otworzyć. Hasło działa tylko w PDF, zapis do JPG jest bez hasła.</li>
         <li><b>Czysty plik.</b> PDF nie zawiera daty, autora, lokalizacji ani nazwy programu.</li>
       </ul>
       <p class="hint">Najsłabszym ogniwem jest to, gdzie trafi gotowy PDF. Akt z PESEL-ami zapisuj w folderze klienta w OneDrive, nie wysyłaj Messengerem ani WhatsAppem bez hasła.</p>
@@ -134,7 +148,7 @@
   <div class="dol" id="dol">
     <button class="btn-aparat" id="btn-aparat">📷 Skanuj</button>
     <button class="btn" id="btn-galeria">🖼 Galeria</button>
-    <button class="btn-primary" id="btn-pdf" disabled>📄 PDF</button>
+    <button class="btn-primary" id="btn-pdf" disabled>💾 Zapisz</button>
   </div>
 
   <input type="file" id="in-aparat" accept="image/*" capture="environment" hidden>
@@ -143,8 +157,8 @@
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=1"></script>
-<script src="pdf-rm.js?v=1"></script>
-<script src="app.js?v=1"></script>
+<script src="skan.js?v=2"></script>
+<script src="pdf-rm.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

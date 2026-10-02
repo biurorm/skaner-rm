@@ -1,10 +1,11 @@
 // RM NIERUCHOMOŚCI, Skaner
-// Zdjęcia stron dokumentu -> automatyczny kadr, prostowanie, poprawa jakości -> jeden PDF (opcjonalnie z hasłem AES-256).
+// Zdjęcia stron dokumentu -> automatyczny kadr, prostowanie, poprawa jakości -> zaznaczone strony
+// w jeden PDF (opcjonalnie z hasłem AES-256) albo jako numerowane JPG.
 // Wszystko w pamięci telefonu. Żadnego serwera, żadnego zapisu zdjęć na stałe.
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 1;
+const WERSJA = 2;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -17,11 +18,22 @@ const TRYBY = [
 ];
 
 const stan = {
-  strony: [],      // { id, zrodlo: Blob, rogi, wykryto, tryb, obrot, wynik: Blob, w, h, mini: url }
+  strony: [],      // { id, zrodlo: Blob, rogi, wykryto, tryb, obrot, wynik: Blob, w, h, mini: url, wybrana }
   tryb: 'kolor',
-  pdf: null,       // File gotowego PDF
+  format: 'pdf',   // 'pdf' = zaznaczone strony w jeden plik, 'jpg' = każda strona osobno, numerowana
+  pliki: null,     // gotowe pliki (File[]) z ostatniego zapisu
+  zapisano: true,  // czy obecny stan stron trafił już do pliku (ostrzeżenie przed zamknięciem)
   ed: null         // edytowana strona: { s, rogi, tryb, obrot, obraz: canvas }
 };
+
+const wybrane = () => stan.strony.filter((s) => s.wybrana);
+const nr2 = (n) => String(n).padStart(2, '0');
+
+// coś się zmieniło w stronach: gotowe pliki są nieaktualne
+function zmiana() {
+  stan.pliki = null; stan.zapisano = !stan.strony.length;
+  const g = $('#z-gotowe'); if (g) g.hidden = true;
+}
 try { const t = localStorage.getItem('rm-skaner-tryb'); if (TRYBY.some((x) => x.k === t)) stan.tryb = t; } catch (e) {}
 
 let licznikId = 0;
@@ -85,7 +97,7 @@ async function dodajPliki(pliki) {
       const rogi = Skan.wykryj(zr);
       const s = {
         id: ++licznikId, zrodlo: await Skan.doBloba(zr, 'image/jpeg', 0.92),
-        rogi: rogi || Skan.PELNY, wykryto: !!rogi, tryb: stan.tryb, obrot: 0
+        rogi: rogi || Skan.PELNY, wykryto: !!rogi, tryb: stan.tryb, obrot: 0, wybrana: true
       };
       await przelicz(s, zr);
       zwolnij(zr);
@@ -95,7 +107,7 @@ async function dodajPliki(pliki) {
     }
   }
   zaslona(null);
-  stan.pdf = null;
+  zmiana();
   rysujListe();
   if (nieudane) toast(`Nie udało się wczytać ${nieudane} zdjęć`);
   else toast(pliki.length > 1 ? `Dodano ${pliki.length} stron` : `Strona ${stan.strony.length} dodana`);
@@ -104,26 +116,31 @@ async function dodajPliki(pliki) {
 // ---------- LISTA ----------
 
 function rysujListe() {
-  const n = stan.strony.length;
+  const n = stan.strony.length, k = wybrane().length;
   $('#pusto').hidden = n > 0;
-  $('#btn-pdf').disabled = n === 0;
-  $('#btn-pdf').textContent = n ? `📄 PDF (${n})` : '📄 PDF';
+  $('#btn-pdf').disabled = k === 0;
+  $('#btn-pdf').textContent = n ? `💾 Zapisz (${k})` : '💾 Zapisz';
   $('#tryb-wszystkie').hidden = n === 0;
-  chipsy($('#tryb-domyslny'), stan.tryb, (k) => {
-    stan.tryb = k;
-    try { localStorage.setItem('rm-skaner-tryb', k); } catch (e) {}
+  $('#wybor').hidden = n === 0;
+  $('#wybor-hint').hidden = n === 0;
+  $('#wybor-tekst').textContent = k === n ? `Zaznaczone wszystkie strony: ${n}` : `Zaznaczone: ${k} z ${n}`;
+  $('#wybor-wszystkie').textContent = k === n ? 'Odznacz wszystkie' : 'Zaznacz wszystkie';
+  chipsy($('#tryb-domyslny'), stan.tryb, (t) => {
+    stan.tryb = t;
+    try { localStorage.setItem('rm-skaner-tryb', t); } catch (e) {}
     rysujListe();
   });
 
   const siatka = $('#siatka');
   siatka.innerHTML = '';
   stan.strony.forEach((s, i) => {
-    const k = document.createElement('div');
-    k.className = 'strona';
-    k.innerHTML = `
+    const el = document.createElement('div');
+    el.className = 'strona' + (s.wybrana ? '' : ' odznaczona');
+    el.innerHTML = `
       <div class="strona-obraz">
         <img alt="Strona ${i + 1}">
-        <span class="strona-nr">${i + 1}</span>
+        <span class="strona-nr">Str. ${i + 1}</span>
+        <button class="strona-check" aria-label="${s.wybrana ? 'Odznacz' : 'Zaznacz'} stronę ${i + 1}" aria-pressed="${s.wybrana}">${s.wybrana ? '✓' : ''}</button>
         ${s.wykryto ? '' : '<span class="strona-uwaga">Sprawdź kadr</span>'}
       </div>
       <div class="strona-akcje">
@@ -133,12 +150,23 @@ function rysujListe() {
         <button data-a="usun" aria-label="Usuń">🗑</button>
         <button data-a="prawo" aria-label="Przesuń dalej" ${i === n - 1 ? 'disabled' : ''}>▶</button>
       </div>`;
-    k.querySelector('img').src = s.mini;
-    k.querySelector('.strona-obraz').addEventListener('click', () => otworzEdytor(s));
-    k.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => akcja(b.dataset.a, s)));
-    siatka.appendChild(k);
+    el.querySelector('img').src = s.mini;
+    el.querySelector('.strona-obraz').addEventListener('click', () => otworzEdytor(s));
+    el.querySelector('.strona-check').addEventListener('click', (e) => {
+      e.stopPropagation();
+      s.wybrana = !s.wybrana;
+      zmiana(); rysujListe();
+    });
+    el.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => akcja(b.dataset.a, s)));
+    siatka.appendChild(el);
   });
 }
+
+$('#wybor-wszystkie').addEventListener('click', () => {
+  const wszystkie = wybrane().length === stan.strony.length;
+  stan.strony.forEach((s) => { s.wybrana = !wszystkie; });
+  zmiana(); rysujListe();
+});
 
 async function akcja(a, s) {
   const i = stan.strony.indexOf(s);
@@ -156,7 +184,7 @@ async function akcja(a, s) {
     await przelicz(s);
     zaslona(null);
   }
-  stan.pdf = null;
+  zmiana();
   rysujListe();
 }
 
@@ -167,7 +195,7 @@ $('#tryb-wszystkie').addEventListener('click', async () => {
     stan.strony[i].tryb = stan.tryb;
     await przelicz(stan.strony[i]);
   }
-  zaslona(null); stan.pdf = null; rysujListe();
+  zaslona(null); zmiana(); rysujListe();
   toast('Zmieniono jakość wszystkich stron');
 });
 
@@ -308,74 +336,117 @@ $('#ed-zapisz').addEventListener('click', async () => {
   zaslona('Zapisuję stronę…'); await oddech();
   await przelicz(s);
   zaslona(null);
-  stan.pdf = null;
+  zmiana();
   zamknijEdytor();
   rysujListe();
 });
 
-// ---------- PDF ----------
+// ---------- ZAPIS: PDF albo JPG ----------
 
 function domyslnaNazwa() {
-  const d = new Date(), z = (n) => String(n).padStart(2, '0');
-  return `Skan ${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}.${z(d.getMinutes())}`;
+  const d = new Date();
+  return `Skan ${d.getFullYear()}-${nr2(d.getMonth() + 1)}-${nr2(d.getDate())} ${nr2(d.getHours())}.${nr2(d.getMinutes())}`;
 }
 
+function rysujFormat() {
+  const pdf = stan.format === 'pdf', k = wybrane().length;
+  $('#z-fmt-pdf').classList.toggle('on', pdf);
+  $('#z-fmt-jpg').classList.toggle('on', !pdf);
+  $('#z-fmt-opis').textContent = pdf
+    ? `Zaznaczone strony (${k}) połączą się w jeden plik PDF, w kolejności z listy.`
+    : `Każda zaznaczona strona (${k}) to osobny plik JPG z numerem strony w nazwie.`;
+  $('#z-haslo-sekcja').hidden = !pdf;
+  $('#z-jpg-uwaga').hidden = pdf;
+  $('#z-utworz').textContent = pdf ? '📄 Utwórz PDF' : `🖼 Utwórz JPG (${k})`;
+}
+
+function ustawFormat(f) {
+  if (stan.format === f) return;
+  stan.format = f;
+  try { localStorage.setItem('rm-skaner-format', f); } catch (e) {}
+  stan.pliki = null; $('#z-gotowe').hidden = true;
+  rysujFormat();
+}
+try { const f = localStorage.getItem('rm-skaner-format'); if (f === 'pdf' || f === 'jpg') stan.format = f; } catch (e) {}
+$('#z-fmt-pdf').addEventListener('click', () => ustawFormat('pdf'));
+$('#z-fmt-jpg').addEventListener('click', () => ustawFormat('jpg'));
+
 function otworzZapis() {
+  if (!wybrane().length) return toast('Zaznacz co najmniej jedną stronę.');
   if (!$('#z-nazwa').value) $('#z-nazwa').value = domyslnaNazwa();
   $('#z-blad').hidden = true;
-  $('#z-gotowe').hidden = !stan.pdf;
+  $('#z-gotowe').hidden = !stan.pliki;
+  rysujFormat();
   pokaz('zapis');
 }
 
-$('#z-haslo-wl').addEventListener('change', (e) => { $('#z-haslo-box').hidden = !e.target.checked; stan.pdf = null; $('#z-gotowe').hidden = true; });
+const niewazne = () => { stan.pliki = null; $('#z-gotowe').hidden = true; };
+$('#z-haslo-wl').addEventListener('change', (e) => { $('#z-haslo-box').hidden = !e.target.checked; niewazne(); });
 $('#z-pokaz').addEventListener('change', (e) => { const t = e.target.checked ? 'text' : 'password'; $('#z-haslo1').type = t; $('#z-haslo2').type = t; });
-['#z-nazwa', '#z-haslo1', '#z-haslo2'].forEach((s) => $(s).addEventListener('input', () => { stan.pdf = null; $('#z-gotowe').hidden = true; }));
+['#z-nazwa', '#z-haslo1', '#z-haslo2'].forEach((s) => $(s).addEventListener('input', niewazne));
 
 function blad(t) { const el = $('#z-blad'); el.textContent = t; el.hidden = !t; }
 
 $('#z-utworz').addEventListener('click', async () => {
   blad('');
+  const strony = wybrane();
+  if (!strony.length) return blad('Nie ma zaznaczonych stron.');
+  const pdf = stan.format === 'pdf';
   let haslo = null;
-  if ($('#z-haslo-wl').checked) {
+  if (pdf && $('#z-haslo-wl').checked) {
     haslo = $('#z-haslo1').value;
     if (haslo.length < 6) return blad('Hasło musi mieć co najmniej 6 znaków.');
     if (haslo !== $('#z-haslo2').value) return blad('Hasła się różnią.');
   }
-  const nazwa = ($('#z-nazwa').value.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\.pdf$/i, '').trim() || domyslnaNazwa()) + '.pdf';
-  zaslona(haslo ? 'Składam i szyfruję PDF…' : 'Składam PDF…'); await oddech();
+  const baza = $('#z-nazwa').value.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\.(pdf|jpe?g)$/i, '').trim() || domyslnaNazwa();
+  zaslona(pdf ? (haslo ? 'Łączę strony i szyfruję PDF…' : 'Łączę strony w PDF…') : 'Przygotowuję JPG…'); await oddech();
   try {
-    const strony = [];
-    for (const s of stan.strony) strony.push({ jpeg: new Uint8Array(await s.wynik.arrayBuffer()), w: s.w, h: s.h });
-    const blob = await PdfRM.zloz(strony, { haslo });
-    stan.pdf = new File([blob], nazwa, { type: 'application/pdf' });
+    if (pdf) {
+      const dane = [];
+      for (const s of strony) dane.push({ jpeg: new Uint8Array(await s.wynik.arrayBuffer()), w: s.w, h: s.h });
+      const blob = await PdfRM.zloz(dane, { haslo });
+      stan.pliki = [new File([blob], baza + '.pdf', { type: 'application/pdf' })];
+    } else {
+      // numer w nazwie = numer strony z listy, pliki układają się w folderze po kolei
+      stan.pliki = strony.map((s) => new File([s.wynik], `${baza} - str ${nr2(stan.strony.indexOf(s) + 1)}.jpg`, { type: 'image/jpeg' }));
+    }
   } catch (e) {
     zaslona(null);
-    return blad('Nie udało się utworzyć PDF. Spróbuj ponownie.');
+    return blad(pdf ? 'Nie udało się utworzyć PDF. Spróbuj ponownie.' : 'Nie udało się przygotować JPG. Spróbuj ponownie.');
   }
   zaslona(null);
-  const mb = (stan.pdf.size / 1048576).toFixed(1).replace('.', ',');
-  $('#z-opis').textContent = `${nazwa}, ${stan.strony.length} str., ${mb} MB${haslo ? ', zabezpieczony hasłem' : ''}.`;
+  const mb = (stan.pliki.reduce((a, f) => a + f.size, 0) / 1048576).toFixed(1).replace('.', ',');
+  $('#z-tytul-gotowe').textContent = pdf ? '✅ PDF gotowy' : `✅ JPG gotowe (${stan.pliki.length})`;
+  $('#z-opis').textContent = pdf
+    ? `${stan.pliki[0].name}, ${strony.length} str., ${mb} MB${haslo ? ', zabezpieczony hasłem' : ''}.`
+    : `${stan.pliki.length === 1 ? stan.pliki[0].name : stan.pliki[0].name + ' … ' + stan.pliki[stan.pliki.length - 1].name}, razem ${mb} MB.`;
+  $('#z-udostepnij').textContent = pdf ? '📤 Zapisz w Plikach / wyślij' : '📤 Zapisz w Zdjęciach / Plikach / wyślij';
+  $('#z-pobierz').textContent = stan.pliki.length > 1 ? `⬇️ Pobierz pliki (${stan.pliki.length})` : '⬇️ Pobierz plik';
   $('#z-gotowe').hidden = false;
-  $('#z-udostepnij').hidden = !(navigator.canShare && navigator.canShare({ files: [stan.pdf] }));
+  $('#z-udostepnij').hidden = !(navigator.canShare && navigator.canShare({ files: stan.pliki }));
   $('#z-gotowe').scrollIntoView({ behavior: 'smooth' });
 });
 
 $('#z-udostepnij').addEventListener('click', async () => {
-  if (!stan.pdf) return;
-  try { await navigator.share({ files: [stan.pdf] }); } catch (e) { /* anulowano */ }
+  if (!stan.pliki) return;
+  try { await navigator.share({ files: stan.pliki }); stan.zapisano = true; } catch (e) { /* anulowano */ }
 });
 
-$('#z-pobierz').addEventListener('click', () => {
-  if (!stan.pdf) return;
-  const url = URL.createObjectURL(stan.pdf), a = document.createElement('a');
-  a.href = url; a.download = stan.pdf.name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+$('#z-pobierz').addEventListener('click', async () => {
+  if (!stan.pliki) return;
+  for (const f of stan.pliki) {
+    const url = URL.createObjectURL(f), a = document.createElement('a');
+    a.href = url; a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (stan.pliki.length > 1) await new Promise((r) => setTimeout(r, 400)); // przeglądarka łapie pliki po kolei
+  }
+  stan.zapisano = true;
 });
 
 function wyczysc() {
   for (const s of stan.strony) if (s.mini) URL.revokeObjectURL(s.mini);
-  stan.strony = []; stan.pdf = null;
+  stan.strony = []; stan.pliki = null; stan.zapisano = true;
   $('#z-nazwa').value = ''; $('#z-haslo1').value = ''; $('#z-haslo2').value = '';
   $('#z-haslo-wl').checked = false; $('#z-haslo-box').hidden = true; $('#z-gotowe').hidden = true;
   rysujListe();
@@ -383,7 +454,7 @@ function wyczysc() {
 }
 
 $('#z-wyczysc').addEventListener('click', () => {
-  if (!confirm('Usunąć wszystkie zeskanowane strony z pamięci? Upewnij się, że PDF jest zapisany.')) return;
+  if (!confirm('Usunąć wszystkie zeskanowane strony z pamięci? Upewnij się, że plik jest zapisany.')) return;
   wyczysc();
   toast('Wyczyszczono. Możesz skanować kolejny dokument.');
 });
@@ -404,7 +475,7 @@ document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer) dodajPliki(e.dataTransfer.files); });
 
 // ostrzeżenie przed zamknięciem z niezapisanymi stronami
-window.addEventListener('beforeunload', (e) => { if (stan.strony.length && !stan.pdf) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (stan.strony.length && !stan.zapisano) { e.preventDefault(); e.returnValue = ''; } });
 
 rysujListe();
 

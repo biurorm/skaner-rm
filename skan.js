@@ -182,16 +182,133 @@ const Skan = (() => {
     return true;
   }
 
-  function ocen(maska, w, h) {
+  // obszar maski -> czworokąt (bez oceny; ocenę robi zgodność z krawędziami zdjęcia)
+  function zMaski(maska, w, h) {
     const obsz = najwiekszy(maska, w, h);
     if (!obsz || obsz.pkt.length < 6) return null;
-    const ot = otoczka(obsz.pkt);
-    const q = doCzworokata(ot);
+    const q = doCzworokata(otoczka(obsz.pkt));
     if (!q) return null;
-    const uq = uporzadkuj(q), pq = pole(uq), udzial = pq / (w * h), wyp = obsz.n / (pq || 1);
-    if (udzial < 0.12 || udzial > 0.985 || !katyOk(uq)) return null;
-    if (wyp < 0.8) return null;
-    return { q: uq, wynik: udzial * Math.min(1, wyp) ** 3 };
+    const uq = uporzadkuj(q);
+    if (obsz.n / (pole(uq) || 1) < 0.8) return null;
+    return uq;
+  }
+
+  // ---- ocena czworokąta: czy każdy bok leży na prawdziwej krawędzi kartki ----
+  // na każdym boku próbkujemy różnicę jasności tuż po obu stronach linii; prawdziwy brzeg kartki ma
+  // wyraźny skok na całej długości, linia narysowana na kartce (tabelka, podpis) ma jasno po obu stronach,
+  // a bok położony na brzegu zdjęcia albo w poprzek blatu skoku nie ma
+  function wsparcie(g, w, h, q) {
+    const pr = (x, y) => {
+      if (x < 0 || y < 0 || x > w - 1.001 || y > h - 1.001) return null;
+      const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = y0 * w + x0;
+      const a = g[i] + (g[i + 1] - g[i]) * fx, b = g[i + w] + (g[i + w + 1] - g[i + w]) * fx;
+      return a + (b - a) * fy;
+    };
+    const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+    const boki = [];
+    for (let k = 0; k < 4; k++) {
+      const A = q[k], B = q[(k + 1) % 4], L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      if (L < 10) return null;
+      const t = [(B[0] - A[0]) / L, (B[1] - A[1]) / L];
+      let n = [-t[1], t[0]];
+      const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+      if ((cx - mx) * n[0] + (cy - my) * n[1] < 0) n = [-n[0], -n[1]]; // normalna do środka kartki
+      const N = Math.max(12, Math.min(60, Math.round(L / 6)));
+      let ok = 0, wszystkie = 0, znak = 0;
+      for (let s = 0; s < N; s++) {
+        const u = 0.06 + 0.88 * (s + 0.5) / N, px = A[0] + (B[0] - A[0]) * u, py = A[1] + (B[1] - A[1]) * u;
+        let best = 0;
+        for (let d = -2; d <= 2; d++) {
+          const wn = pr(px + n[0] * (d + 3), py + n[1] * (d + 3)), zw = pr(px + n[0] * (d - 3), py + n[1] * (d - 3));
+          if (wn === null || zw === null) continue;
+          if (Math.abs(wn - zw) > Math.abs(best)) best = wn - zw;
+        }
+        wszystkie++;
+        if (Math.abs(best) > 22) { ok++; znak += best > 0 ? 1 : -1; }
+      }
+      // brzeg kartki ma skok w jedną stronę (kartka jaśniejsza albo ciemniejsza od tła), nie na przemian
+      const spojnosc = ok ? Math.abs(znak) / ok : 0;
+      boki.push((ok / wszystkie) * (0.5 + 0.5 * spojnosc));
+    }
+    return boki;
+  }
+
+  function wynikQ(g, w, h, q) {
+    if (!katyOk(q)) return null;
+    for (const [x, y] of q) if (x < -0.03 * w || x > 1.03 * w || y < -0.03 * h || y > 1.03 * h) return null;
+    const udzial = pole(q) / (w * h);
+    if (udzial < 0.08 || udzial > 0.99) return null;
+    const b = wsparcie(g, w, h, q);
+    if (!b) return null;
+    const sr = Math.pow(b[0] * b[1] * b[2] * b[3], 0.25), min = Math.min(...b);
+    if (min < 0.3) return null;
+    return { q, wynik: sr * sr * Math.pow(udzial, 0.35), sr };
+  }
+
+  // ---- proste linie na zdjęciu (transformata Hougha z kierunkiem gradientu) ----
+  function linie(g, w, h) {
+    const gx = new Float32Array(w * h), gy = new Float32Array(w * h), mag = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      gx[i] = g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - 1] - g[i + w - 1];
+      gy[i] = g[i + w - 1] + 2 * g[i + w] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - w] - g[i - w + 1];
+      mag[i] = Math.hypot(gx[i], gy[i]);
+    }
+    const T = Math.max(60, percentyl(mag, 0.9));
+    const NT = 180, diag = Math.ceil(Math.hypot(w, h)), NR = diag + 1; // rho co 2 px, od -diag do +diag
+    const acc = new Float32Array(NT * NR), cs = new Float32Array(NT), sn = new Float32Array(NT);
+    for (let t = 0; t < NT; t++) { cs[t] = Math.cos(t * Math.PI / NT); sn[t] = Math.sin(t * Math.PI / NT); }
+    for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++) {
+      const i = y * w + x;
+      if (mag[i] < T) continue;
+      let a = Math.atan2(gy[i], gx[i]); if (a < 0) a += Math.PI;
+      const t0 = Math.round(a * NT / Math.PI);
+      for (let dt = -3; dt <= 3; dt++) {
+        const t = (t0 + dt + NT) % NT;
+        const r = Math.round((x * cs[t] + y * sn[t] + diag) / 2);
+        acc[t * NR + r] += 1;
+      }
+    }
+    const wynik = [], minGlos = 0.12 * Math.min(w, h);
+    for (let k = 0; k < 24; k++) {
+      let m = 0, mi = -1;
+      for (let i = 0; i < acc.length; i++) if (acc[i] > m) { m = acc[i]; mi = i; }
+      if (mi < 0 || m < minGlos) break;
+      const t = (mi / NR) | 0, r = mi % NR;
+      wynik.push({ th: t * Math.PI / NT, rho: r * 2 - diag });
+      for (let dt = -6; dt <= 6; dt++) {
+        const tt = t + dt, odbite = tt < 0 || tt >= NT, t2 = (tt + NT) % NT;
+        const rc = odbite ? NR - 1 - r : r; // przejście przez 0/180 stopni odwraca znak rho
+        for (let dr = -7; dr <= 7; dr++) { const rr = rc + dr; if (rr >= 0 && rr < NR) acc[t2 * NR + rr] = 0; }
+      }
+    }
+    return wynik;
+  }
+
+  function przeciecie(a, b) {
+    const ca = Math.cos(a.th), sa = Math.sin(a.th), cb = Math.cos(b.th), sb = Math.sin(b.th);
+    const det = ca * sb - sa * cb;
+    if (Math.abs(det) < 1e-6) return null;
+    return [(a.rho * sb - b.rho * sa) / det, (ca * b.rho - cb * a.rho) / det];
+  }
+
+  function zLinii(L, w, h, g) {
+    const kat = (a, b) => { const d = Math.abs(a.th - b.th) % Math.PI; return Math.min(d, Math.PI - d); };
+    const pary = [];
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+      if (kat(L[i], L[j]) > 0.35) continue; // przeciwległe boki: prawie równoległe
+      pary.push([L[i], L[j]]);
+    }
+    const kand = [];
+    for (let i = 0; i < pary.length; i++) for (let j = i + 1; j < pary.length; j++) {
+      const [a, b] = pary[i], [c, d] = pary[j];
+      if (kat(a, c) < 0.8) continue; // druga para mniej więcej prostopadła
+      const p = [przeciecie(a, c), przeciecie(c, b), przeciecie(b, d), przeciecie(d, a)];
+      if (p.some((x) => !x)) continue;
+      const o = wynikQ(g, w, h, uporzadkuj(p));
+      if (o) kand.push(o);
+    }
+    return kand;
   }
 
   // zwraca 4 rogi w ułamkach (0..1) albo null, gdy kartki nie widać wyraźnie
@@ -208,17 +325,21 @@ const Skan = (() => {
       // "papierowość": jasne i mało nasycone (blat, drewno, obrus odpadają)
       pap[j] = jas[j] - 0.6 * (Math.max(r, g, b) - Math.min(r, g, b));
     }
+    const g = rozmyj(jas, w, h, 1);
     const kand = [];
+    const dodaj = (q) => { if (q) { const o = wynikQ(g, w, h, q); if (o) kand.push(o); } };
 
-    // A) kartka jaśniejsza od tła
+    // A) proste krawędzie: czworokąty z 4 linii, główna metoda (radzi sobie z kartką leżącą na innej kartce)
+    try { kand.push(...zLinii(linie(rozmyj(jas, w, h, 2), w, h), w, h, g)); } catch (e) {}
+
+    // B) kartka jaśniejsza od tła; mocniejsze otwarcie rozcina kartki, które się stykają
     const pr = rozmyj(pap, w, h, 2), prog = otsu(pr);
-    let m = new Uint8Array(w * h);
-    for (let i = 0; i < m.length; i++) m[i] = pr[i] > prog ? 1 : 0;
-    m = morf(morf(m, w, h, 2, false), w, h, 2, true);
-    kand.push(ocen(m, w, h));
+    const m0 = new Uint8Array(w * h);
+    for (let i = 0; i < m0.length; i++) m0[i] = pr[i] > prog ? 1 : 0;
+    for (const r of [2, 5, 9]) dodaj(zMaski(morf(morf(m0, w, h, r, false), w, h, r, true), w, h));
 
-    // B) krawędzie: wszystko, czego nie da się "zalać" od brzegu zdjęcia, jest kartką
-    const g = rozmyj(jas, w, h, 1), mag = new Float32Array(w * h);
+    // C) krawędzie: wszystko, czego nie da się "zalać" od brzegu zdjęcia, jest kartką
+    const mag = new Float32Array(w * h);
     for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
       const gx = g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1] - g[i - w - 1] - 2 * g[i - 1] - g[i + w - 1];
@@ -232,23 +353,23 @@ const Skan = (() => {
         for (let i = 0; i < kr.length; i++) kr[i] = mag[i] > t ? 1 : 0;
         kr = morf(kr, w, h, r, true);
         const tlo = new Uint8Array(w * h), stos = new Int32Array(w * h); let sp = 0;
-        const dodaj = (p) => { if (!kr[p] && !tlo[p]) { tlo[p] = 1; stos[sp++] = p; } };
-        for (let x = 0; x < w; x++) { dodaj(x); dodaj((h - 1) * w + x); }
-        for (let y = 0; y < h; y++) { dodaj(y * w); dodaj(y * w + w - 1); }
+        const zalej = (p) => { if (!kr[p] && !tlo[p]) { tlo[p] = 1; stos[sp++] = p; } };
+        for (let x = 0; x < w; x++) { zalej(x); zalej((h - 1) * w + x); }
+        for (let y = 0; y < h; y++) { zalej(y * w); zalej(y * w + w - 1); }
         while (sp) {
           const p = stos[--sp], x = p % w, y = (p / w) | 0;
-          if (x > 0) dodaj(p - 1); if (x < w - 1) dodaj(p + 1);
-          if (y > 0) dodaj(p - w); if (y < h - 1) dodaj(p + w);
+          if (x > 0) zalej(p - 1); if (x < w - 1) zalej(p + 1);
+          if (y > 0) zalej(p - w); if (y < h - 1) zalej(p + w);
         }
         let wn = new Uint8Array(w * h);
         for (let i = 0; i < wn.length; i++) wn[i] = tlo[i] ? 0 : 1;
         wn = morf(wn, w, h, r, false); // zdejmujemy grubość dorysowanej krawędzi
-        kand.push(ocen(wn, w, h));
+        dodaj(zMaski(wn, w, h));
       }
     }
 
-    const best = kand.filter(Boolean).sort((a, b) => b.wynik - a.wynik)[0];
-    if (!best) return null;
+    const best = kand.sort((a, b) => b.wynik - a.wynik)[0];
+    if (!best || best.sr < 0.55) return null;
     const rogi = best.q.map(([x, y]) => [Math.min(1, Math.max(0, x / w)), Math.min(1, Math.max(0, y / h))]);
     try { return dopracuj(zrodlo, rogi); } catch (e) { return rogi; }
   }
