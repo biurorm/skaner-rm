@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div class="app">
@@ -43,12 +43,13 @@
       <div class="etykieta">Jakość dla nowych stron</div>
       <div class="chips" id="tryb-domyslny"></div>
       <button class="link-btn" id="tryb-wszystkie" hidden>Zastosuj do wszystkich stron</button>
+      <button class="link-btn" id="btn-nazywo">⚡ Skan na żywo z auto-zdjęciem (szybciej, ale mniej ostro)</button>
     </div>
 
     <div class="pusto" id="pusto">
       <div class="pusto-ikona">📄</div>
       <p><b>Zrób zdjęcie pierwszej strony.</b></p>
-      <p class="hint">Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem. Zielona ramka pokaże kartkę jeszcze przed zdjęciem, a gdy przestaniesz ruszać telefonem, zdjęcie zrobi się samo. Prostowanie i poprawa jakości dzieją się same. Kadr poprawisz palcem.</p>
+      <p class="hint">Dotknij 📷 Aparat: otworzy się zwykły aparat telefonu, z pełną ostrością. Kartka na ciemniejszym blacie, cała w kadrze, telefon nad środkiem, potem „Użyj zdjęcia”. Prostowanie i poprawa jakości dzieją się same, kadr poprawisz palcem. Kolejną stronę dodasz tym samym przyciskiem.</p>
     </div>
 
     <div class="wybor" id="wybor" hidden>
@@ -173,7 +174,7 @@
 
   <!-- DOLNY PASEK -->
   <div class="dol" id="dol">
-    <button class="btn-aparat" id="btn-aparat">📷 Skanuj</button>
+    <button class="btn-aparat" id="btn-aparat">📷 Aparat</button>
     <button class="btn" id="btn-galeria">➕ Galeria</button>
     <button class="btn-primary" id="btn-pdf" disabled>📄 PDF</button>
     <button class="btn-primary" id="btn-jpg" disabled>🖼 JPG</button>
@@ -185,8 +186,8 @@
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=4"></script>
-<script src="pdf-rm.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="skan.js?v=5"></script>
+<script src="pdf-rm.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

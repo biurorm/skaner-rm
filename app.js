@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 4;
+const WERSJA = 5;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -77,7 +77,7 @@ async function przelicz(s, zrodloCanvas) {
   const zr = zrodloCanvas || await Skan.wczytaj(s.zrodlo);
   const wynik = Skan.przetworz(zr, s.rogi, s.tryb, s.obrot);
   if (!zrodloCanvas) zwolnij(zr);
-  s.wynik = await Skan.doBloba(wynik, 'image/jpeg', s.tryb === 'czb' ? 0.8 : 0.85);
+  s.wynik = await Skan.doBloba(wynik, 'image/jpeg', s.tryb === 'czb' ? 0.9 : 0.92);
   s.w = wynik.width; s.h = wynik.height;
   const m = Skan.miniatura(wynik);
   if (s.mini) URL.revokeObjectURL(s.mini);
@@ -644,7 +644,9 @@ $('#btn-jpg').addEventListener('click', () => {
 
 // ---------- PRZYCISKI GŁÓWNE ----------
 
-$('#btn-aparat').addEventListener('click', () => Kamera.otworz());
+// główny przycisk: zwykły aparat telefonu (pełne 12 Mpx i obróbka iPhone'a), skan na żywo jako opcja
+$('#btn-aparat').addEventListener('click', () => $('#in-aparat').click());
+$('#btn-nazywo').addEventListener('click', () => Kamera.otworz());
 $('#btn-galeria').addEventListener('click', () => $('#in-galeria').click());
 $('#btn-pdf').addEventListener('click', () => { stan.format = 'pdf'; otworzZapis(); });
 $('#in-aparat').addEventListener('change', async (e) => { await dodajPliki(e.target.files); e.target.value = ''; });

@@ -4,8 +4,8 @@
 'use strict';
 
 const Skan = (() => {
-  const MAX_ZRODLO = 3000;   // dłuższy bok zdjęcia trzymanego w pamięci
-  const MAX_WYNIK = 2339;    // dłuższy bok strony wynikowej (A4 przy 200 dpi)
+  const MAX_ZRODLO = 4032;   // dłuższy bok zdjęcia trzymanego w pamięci (pełne 12 Mpx z aparatu iPhone'a)
+  const MAX_WYNIK = 3508;    // dłuższy bok strony wynikowej (A4 przy 300 dpi)
   const DET = 640;           // rozdzielczość robocza wykrywania rogów
   const DET_SZYBKO = 360;    // to samo na żywo z aparatu (kilka razy na sekundę)
 
@@ -475,7 +475,7 @@ const Skan = (() => {
     // kartka bliska A4 -> dokładnie A4 (zdjęcie pod kątem lekko przekłamuje proporcje)
     const A4 = Math.SQRT2, r = Math.max(w, h) / Math.min(w, h);
     if (Math.abs(r - A4) / A4 < 0.09) { if (h >= w) h = w * A4; else w = h * A4; }
-    const s = Math.min(MAX_WYNIK / Math.max(w, h), 1.3);
+    const s = Math.min(MAX_WYNIK / Math.max(w, h), 1.15);
     return [Math.round(w * s), Math.round(h * s)];
   }
 
@@ -516,17 +516,17 @@ const Skan = (() => {
     const K = 16, lw = Math.ceil(w / K), lh = Math.ceil(h / K);
     let low = new Float32Array(lw * lh);
     for (let ly = 0; ly < lh; ly++) for (let lx = 0; lx < lw; lx++) {
-      // jasny percentyl w kratce: 3. najjaśniejsza z próbek
+      // jasny percentyl w kratce (ok. 92.), odporny na pojedyncze prześwietlone piksele i szum JPEG
       const pr = [];
-      for (let y = ly * K; y < Math.min(h, ly * K + K); y += 4) for (let x = lx * K; x < Math.min(w, lx * K + K); x += 4) pr.push(d[(y * w + x) * 4 + kan]);
+      for (let y = ly * K; y < Math.min(h, ly * K + K); y += 3) for (let x = lx * K; x < Math.min(w, lx * K + K); x += 3) pr.push(d[(y * w + x) * 4 + kan]);
       pr.sort((a, b) => b - a);
-      low[ly * lw + lx] = pr[Math.min(pr.length - 1, 2)] || 255;
+      low[ly * lw + lx] = pr[Math.min(pr.length - 1, Math.floor(pr.length * 0.08))] || 255;
     }
-    // dylatacja 2 kratek: tekst i tabelki nie zaniżają tła
+    // maksimum z sąsiednich kratek: gęsty tekst i tabelki nie zaniżają tła
     const dil = new Float32Array(lw * lh);
     for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
       let m = 0;
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const xx = Math.min(lw - 1, Math.max(0, x + dx)), yy = Math.min(lh - 1, Math.max(0, y + dy));
         m = Math.max(m, low[yy * lw + xx]);
       }
@@ -534,6 +534,15 @@ const Skan = (() => {
     }
     low = rozmyj(dil, lw, lh, 2);
     return { low, lw, lh, K };
+  }
+
+  // krzywa tonalna: papier (i prześwitujący druk z drugiej strony) -> czysta biel, tusz -> głęboka czerń,
+  // gładkie przejście w środku, żeby litery nie były poszarpane
+  const BIEL = 0.86, CZERN = 0.30;
+  function krzywa(t) {
+    let u = (t - CZERN) / (BIEL - CZERN);
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    return 255 * Math.pow(u, 1.25);
   }
 
   function popraw(c, tryb) {
@@ -545,42 +554,39 @@ const Skan = (() => {
       for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = g; }
     }
     const kanaly = kolor ? [0, 1, 2] : [0];
-    const tla = kanaly.map((k) => tloKartki(d, w, h, k));
-    const czern = 40; // poziom czerni po wyrównaniu tła
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = (y * w + x) * 4;
-        for (let n = 0; n < kanaly.length; n++) {
-          const { low, lw, lh, K } = tla[n];
-          const fx = Math.min(lw - 1.001, Math.max(0, x / K - 0.5)), fy = Math.min(lh - 1.001, Math.max(0, y / K - 0.5));
-          const x0 = fx | 0, y0 = fy | 0, ax = fx - x0, ay = fy - y0;
+    const L = new Float32Array(w * h);
+    for (const kan of kanaly) {
+      // 1) wyrównanie tła: piksel / tło kartki (0..1), cienie i żółte światło znikają
+      const { low, lw, lh, K } = tloKartki(d, w, h, kan);
+      for (let y = 0; y < h; y++) {
+        const fy = Math.min(lh - 1.001, Math.max(0, y / K - 0.5)), y0 = fy | 0, ay = fy - y0;
+        for (let x = 0; x < w; x++) {
+          const fx = Math.min(lw - 1.001, Math.max(0, x / K - 0.5)), x0 = fx | 0, ax = fx - x0;
           const t0 = low[y0 * lw + x0] + (low[y0 * lw + x0 + 1] - low[y0 * lw + x0]) * ax;
           const t1 = low[(y0 + 1) * lw + x0] + (low[(y0 + 1) * lw + x0 + 1] - low[(y0 + 1) * lw + x0]) * ax;
-          const tlo = Math.max(30, t0 + (t1 - t0) * ay);
-          let v = Math.min(255, (d[i + kanaly[n]] / tlo) * 255);
-          v = ((v - czern) / (250 - czern)) * 255;
-          if (tryb === 'czb') v = (v - 150) * 4 + 128; // ostry próg z wąskim przejściem (gładkie litery)
-          v = v < 0 ? 0 : v > 255 ? 255 : v;
-          d[i + kanaly[n]] = v;
+          const v = d[(y * w + x) * 4 + kan] / Math.max(30, t0 + (t1 - t0) * ay);
+          L[y * w + x] = v > 1.2 ? 1.2 : v;
         }
-        if (!kolor) d[i + 1] = d[i + 2] = d[i];
+      }
+      // 2) wyostrzenie (maska nieostra, promień ok. 1,5 px): krawędzie liter jak żyleta
+      if (tryb !== 'czb') wyostrz(L, w, h);
+      // 3) krzywa tonalna
+      for (let j = 0, i = kan; j < L.length; j++, i += 4) {
+        let v;
+        if (tryb === 'czb') { v = (L[j] - 0.62) * 900 + 128; v = v < 0 ? 0 : v > 255 ? 255 : v; }
+        else v = krzywa(L[j]);
+        d[i] = v;
+        if (!kolor) { d[i + 1] = v; d[i + 2] = v; }
       }
     }
-    if (tryb !== 'czb') wyostrz(d, w, h);
     ctx.putImageData(img, 0, 0);
     return c;
   }
 
-  function wyostrz(d, w, h) {
-    // maska wyostrzająca, delikatna: litery ostrzejsze, bez ziarna
-    const a = 0.55, src = new Uint8ClampedArray(d);
-    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-      const i = (y * w + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        const s = src[i + c] * 4 - src[i - 4 + c] - src[i + 4 + c] - src[i - w * 4 + c] - src[i + w * 4 + c];
-        d[i + c] = src[i + c] + a * s / 4;
-      }
-    }
+  function wyostrz(L, w, h) {
+    // maska nieostra: oryginał + 1,3 * (oryginał - rozmycie), rozmycie 3x3 dwa razy (ok. gauss 1,2 px)
+    const b = rozmyj(rozmyj(L, w, h, 1), w, h, 1), A = 1.3;
+    for (let j = 0; j < L.length; j++) L[j] = L[j] + A * (L[j] - b[j]);
   }
 
   function obroc(c, stopnie) {
