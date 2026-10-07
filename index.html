@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <div class="app">
@@ -54,7 +54,10 @@
 
     <div class="wybor" id="wybor" hidden>
       <span id="wybor-tekst"></span>
-      <button class="link-btn" id="wybor-wszystkie">Odznacz wszystkie</button>
+      <span class="wybor-akcje">
+        <button class="link-btn" id="wybor-wszystkie">Odznacz wszystkie</button>
+        <button class="link-btn danger-link" id="wybor-usun">🗑 Usuń zaznaczone</button>
+      </span>
     </div>
     <p class="hint wybor-hint" id="wybor-hint" hidden>Dotknij stronę, żeby ją zaznaczyć albo odznaczyć. Do pliku idą tylko zaznaczone ✓, w kolejności numerów. Kadr poprawisz nożyczkami ✂️.</p>
 
@@ -186,8 +189,8 @@
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=5"></script>
-<script src="pdf-rm.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="skan.js?v=6"></script>
+<script src="pdf-rm.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

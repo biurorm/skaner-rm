@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 5;
+const WERSJA = 6;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -135,6 +135,8 @@ function rysujListe() {
   $('#wybor-hint').hidden = n === 0;
   $('#wybor-tekst').textContent = k === n ? `Zaznaczone wszystkie strony: ${n}` : `Zaznaczone: ${k} z ${n}`;
   $('#wybor-wszystkie').textContent = k === n ? 'Odznacz wszystkie' : 'Zaznacz wszystkie';
+  $('#wybor-usun').hidden = k === 0;
+  $('#wybor-usun').textContent = `🗑 Usuń zaznaczone (${k})`;
   chipsy($('#tryb-domyslny'), stan.tryb, (t) => {
     stan.tryb = t;
     try { localStorage.setItem('rm-skaner-tryb', t); } catch (e) {}
@@ -175,6 +177,18 @@ $('#wybor-wszystkie').addEventListener('click', () => {
   const wszystkie = wybrane().length === stan.strony.length;
   stan.strony.forEach((s) => { s.wybrana = !wszystkie; });
   zmiana(); rysujListe();
+});
+
+$('#wybor-usun').addEventListener('click', () => {
+  const doUsuniecia = wybrane();
+  if (!doUsuniecia.length) return;
+  const zostaje = stan.strony.length - doUsuniecia.length;
+  const pyt = zostaje ? `Usunąć zaznaczone strony (${doUsuniecia.length})? Zostanie ${zostaje}.` : `Usunąć wszystkie strony (${doUsuniecia.length})? Upewnij się, że plik jest zapisany.`;
+  if (!confirm(pyt)) return;
+  for (const s of doUsuniecia) if (s.mini) URL.revokeObjectURL(s.mini);
+  stan.strony = stan.strony.filter((s) => !doUsuniecia.includes(s));
+  zmiana(); rysujListe();
+  toast(`Usunięto stron: ${doUsuniecia.length}`, 1500);
 });
 
 async function akcja(a, s) {

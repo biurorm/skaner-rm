@@ -87,6 +87,8 @@ header {
 .strona.odznaczona .strona-nr { background: var(--muted); }
 .wybor { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
 .wybor-hint { margin: 0 0 10px; }
+.wybor-akcje { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.danger-link { color: #b91c1c; }
 .format { display: flex; gap: 8px; margin-bottom: 4px; }
 .format-btn {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
