@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 8;
+const WERSJA = 9;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -587,6 +587,7 @@ $('#kam-mini').addEventListener('click', () => {
 });
 
 const Kamera = (() => {
+  const POCHYL = 0.07;        // dopuszczalna różnica długości przeciwległych boków ramki (telefon równolegle do kartki)
   const STABILNIE_MS = 900;   // tyle ramka musi stać w miejscu przed auto-zdjęciem
   const RUCH = 0.02;          // dopuszczalne drganie rogu między klatkami (ułamek kadru)
   let strumien = null, petlaT = null, zajety = false;
@@ -657,23 +658,25 @@ const Kamera = (() => {
   }
 
   // kilka kolejnych klatek w pełnej rozdzielczości, zostaje najostrzejsza (bez poruszenia i z trafionym fokusem)
-  async function najostrzejsza(hint, ile = 6) {
+  async function najostrzejsza(hint, ile = 8) {
     const vw = video.videoWidth, vh = video.videoHeight, sk = Math.min(1, 4032 / Math.max(vw, vh));
     const best = Skan.plotno(vw * sk, vh * sk), bctx = best.getContext('2d');
     bctx.imageSmoothingQuality = 'high';
     let xs = [0.2, 0.8], ys = [0.2, 0.8];
     if (hint) { xs = hint.map((p) => p[0]); ys = hint.map((p) => p[1]); }
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    // środek kartki (bez marginesów), w natywnej rozdzielczości wideo
-    const sx = (x0 + (x1 - x0) * 0.2) * vw, sy = (y0 + (y1 - y0) * 0.2) * vh;
-    const sw = Math.max(16, (x1 - x0) * 0.6 * vw), sh = Math.max(16, (y1 - y0) * 0.6 * vh);
+    // trzy pasy kartki: góra, środek, dół (bez marginesów), w natywnej rozdzielczości wideo
+    const sx = (x0 + (x1 - x0) * 0.15) * vw, sw = Math.max(16, (x1 - x0) * 0.7 * vw);
+    const sh = Math.max(16, (y1 - y0) * 0.16 * vh);
+    const pasy = [0.08, 0.42, 0.76].map((f) => (y0 + (y1 - y0) * f) * vh);
     const pw = Math.min(640, Math.round(sw)), ph = Math.max(16, Math.round(pw * sh / sw));
     const probka = Skan.plotno(pw, ph), pctx = probka.getContext('2d', { willReadFrequently: true });
     let wynik = -1;
     for (let k = 0; k < ile; k++) {
       if (k) await czekajKlatke();
-      pctx.drawImage(video, sx, sy, sw, sh, 0, 0, pw, ph);
-      const o = ostrosc(probka);
+      // liczy się najsłabszy pas: klatka wygrywa tylko wtedy, gdy ostra jest cała kartka
+      let o = Infinity;
+      for (const sy of pasy) { pctx.drawImage(video, sx, sy, sw, sh, 0, 0, pw, ph); o = Math.min(o, ostrosc(probka)); }
       if (o > wynik) { wynik = o; bctx.drawImage(video, 0, 0, best.width, best.height); }
     }
     return best;
@@ -701,11 +704,26 @@ const Kamera = (() => {
     $('#kam-auto').classList.toggle('on', auto);
   }
 
-  function rysujRamke(q, postep) {
+  function rysujRamke(q, postep, krzywo) {
     const w = $('#kam-wielokat');
     if (!q) { w.setAttribute('points', ''); return; }
     w.setAttribute('points', q.map(([x, y]) => `${x},${y}`).join(' '));
-    w.style.fill = `rgba(34,197,94,${0.12 + 0.3 * (postep || 0)})`;
+    w.style.stroke = krzywo ? '#f59e0b' : '#22c55e';
+    w.style.fill = krzywo ? 'rgba(245,158,11,.15)' : `rgba(34,197,94,${0.12 + 0.3 * (postep || 0)})`;
+  }
+
+  // telefon pochylony nad kartką: dalsza krawędź wychodzi krótsza i nieostra (mała głębia ostrości z bliska).
+  // Zwraca podpowiedź albo null, gdy telefon leży równolegle.
+  function pochylenie(q) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const d = (a, b) => Math.hypot((a[0] - b[0]) * vw, (a[1] - b[1]) * vh);
+    const gora = d(q[0], q[1]), dol = d(q[3], q[2]), lewa = d(q[0], q[3]), prawa = d(q[1], q[2]);
+    const pion = gora / dol, poziom = lewa / prawa;
+    if (pion < 1 - POCHYL) return 'Góra kartki jest dalej: wyprostuj telefon, trzymaj go równo nad kartką';
+    if (pion > 1 + POCHYL) return 'Dół kartki jest dalej: wyprostuj telefon, trzymaj go równo nad kartką';
+    if (poziom < 1 - POCHYL) return 'Lewy brzeg jest dalej: wyprostuj telefon, trzymaj go równo nad kartką';
+    if (poziom > 1 + POCHYL) return 'Prawy brzeg jest dalej: wyprostuj telefon, trzymaj go równo nad kartką';
+    return null;
   }
 
   // mała szara miniatura kadru: po niej poznajemy, że pod aparatem leży już inna kartka
@@ -739,9 +757,12 @@ const Kamera = (() => {
         if (ruch > RUCH) stabilnaOd = teraz;
         // wygładzanie: ramka nie skacze między klatkami
         ramka = ramka && ruch < 0.08 ? r.map((p, i) => [ramka[i][0] * 0.5 + p[0] * 0.5, ramka[i][1] * 0.5 + p[1] * 0.5]) : r;
+        const krzywo = pochylenie(ramka);
+        if (krzywo) stabilnaOd = teraz; // auto-zdjęcie dopiero, gdy telefon jest równolegle
         const postep = Math.min(1, (teraz - stabilnaOd) / STABILNIE_MS);
-        rysujRamke(ramka, auto && uzbrojony ? postep : 0);
+        rysujRamke(ramka, auto && uzbrojony ? postep : 0, krzywo && uzbrojony);
         if (!uzbrojony) status('Strona zapisana. Połóż następną kartkę.', true);
+        else if (krzywo) status(krzywo);
         else if (auto) status(postep < 1 ? 'Mam kartkę. Nie ruszaj telefonem…' : 'Robię zdjęcie…', true);
         else status('Mam kartkę. Naciśnij spust.', true);
         if (auto && uzbrojony && postep >= 1) { pstryk(); }
