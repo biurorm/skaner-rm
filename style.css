@@ -87,6 +87,18 @@ header {
 .strona.odznaczona .strona-nr { background: var(--muted); }
 .wybor { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
 .wybor-hint { margin: 0 0 10px; }
+.strona-lupa { position: absolute; left: 4px; bottom: 4px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 18px; padding: 0; }
+.podglad { position: fixed; inset: 0; z-index: 50; background: #111; display: flex; flex-direction: column; }
+.podglad[hidden] { display: none; }
+.podglad-gora, .podglad-dol { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; color: #fff; font-weight: 600; }
+.podglad-gora { padding-top: max(10px, env(safe-area-inset-top)); }
+.podglad-dol { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+.pg-btn { background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; }
+.pg-btn:disabled { opacity: .3; }
+.pg-hint { font-size: 12px; color: #bbb; text-align: center; flex: 1; }
+.podglad-pole { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; display: flex; align-items: flex-start; justify-content: center; touch-action: pan-x pan-y; }
+.podglad-pole img { display: block; margin: auto; background: #fff; }
+.kam-mini { cursor: pointer; }
 .wybor-akcje { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .danger-link { color: #b91c1c; }
 .format { display: flex; gap: 8px; margin-bottom: 4px; }

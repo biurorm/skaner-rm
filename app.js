@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 7;
+const WERSJA = 8;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -154,6 +154,7 @@ function rysujListe() {
         <span class="strona-nr">Str. ${i + 1}</span>
         <button class="strona-check" aria-label="${s.wybrana ? 'Odznacz' : 'Zaznacz'} stronę ${i + 1}" aria-pressed="${s.wybrana}">${s.wybrana ? '✓' : ''}</button>
         ${s.wykryto ? '' : '<span class="strona-uwaga">Sprawdź kadr</span>'}
+        <button class="strona-lupa" aria-label="Podgląd strony ${i + 1}">🔍</button>
       </div>
       <div class="strona-akcje">
         <button data-a="lewo" aria-label="Przesuń wcześniej" ${i === 0 ? 'disabled' : ''}>◀</button>
@@ -168,6 +169,7 @@ function rysujListe() {
       s.wybrana = !s.wybrana;
       zmiana(); rysujListe();
     });
+    el.querySelector('.strona-lupa').addEventListener('click', (e) => { e.stopPropagation(); Podglad.otworz(s); });
     el.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', () => akcja(b.dataset.a, s)));
     siatka.appendChild(el);
   });
@@ -482,6 +484,108 @@ $('#z-wroc').addEventListener('click', () => pokaz('lista'));
 // Gdy ramka stoi nieruchomo ok. 1 s, zdjęcie robi się samo. Kolejna strona dopiero po zmianie kartki.
 // Obraz z aparatu nie opuszcza telefonu, jak wszystko inne w tej aplikacji.
 
+// ---------- PODGLĄD STRONY ----------
+// pełny ekran z gotową stroną w pełnej rozdzielczości: sprawdzenie ostrości bez wchodzenia w edycję
+
+const Podglad = (() => {
+  let s = null, url = null, dopas = 0, skala = 1;
+  const el = $('#podglad'), img = $('#pg-img'), pole = $('#pg-pole');
+
+  function ustawSkale(k, sx, sy) {
+    // k = 1: cała strona w oknie; większe = powiększenie (do rozdzielczości pliku x2)
+    const max = Math.max(1, (s.w / dopas) * 2);
+    const stara = skala;
+    skala = Math.min(max, Math.max(1, k));
+    if (sx == null) sx = pole.clientWidth / 2;
+    if (sy == null) sy = pole.clientHeight / 2;
+    const px = pole.scrollLeft + sx, py = pole.scrollTop + sy;
+    img.style.width = Math.round(dopas * skala) + 'px';
+    const r = skala / stara;
+    pole.scrollLeft = px * r - sx;
+    pole.scrollTop = py * r - sy;
+  }
+
+  function pokazStrone(nowa) {
+    s = nowa;
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(s.wynik);
+    img.src = url;
+    const i = stan.strony.indexOf(s), n = stan.strony.length;
+    $('#pg-nr').textContent = `Str. ${i + 1} z ${n}`;
+    $('#pg-wstecz').disabled = i <= 0;
+    $('#pg-dalej').disabled = i >= n - 1;
+    dopas = Math.min(pole.clientWidth - 8, (pole.clientHeight - 8) * s.w / s.h);
+    skala = 1; img.style.width = Math.round(dopas) + 'px';
+    pole.scrollTop = 0; pole.scrollLeft = 0;
+  }
+
+  function otworz(strona) {
+    if (!strona || !strona.wynik) return;
+    el.hidden = false;
+    pokazStrone(strona);
+  }
+
+  function zamknij() {
+    el.hidden = true; img.removeAttribute('src');
+    if (url) URL.revokeObjectURL(url);
+    url = null; s = null;
+  }
+
+  const krok = (d) => { const i = stan.strony.indexOf(s) + d; if (stan.strony[i]) pokazStrone(stan.strony[i]); };
+  $('#pg-zamknij').addEventListener('click', zamknij);
+  $('#pg-wstecz').addEventListener('click', () => krok(-1));
+  $('#pg-dalej').addEventListener('click', () => krok(1));
+  $('#pg-kadr').addEventListener('click', () => {
+    const x = s; zamknij();
+    if (!x) return;
+    if (document.querySelector('#ekran-kamera.active')) $('#kam-gotowe').click();
+    otworzEdytor(x);
+  });
+
+  // podwójne dotknięcie: powiększ w to miejsce albo wróć do całej strony
+  let ostatni = 0;
+  pole.addEventListener('click', (e) => {
+    const t = Date.now();
+    if (t - ostatni < 320) {
+      const r = pole.getBoundingClientRect();
+      ustawSkale(skala > 1.05 ? 1 : Math.max(2.5, s.w / dopas), e.clientX - r.left, e.clientY - r.top);
+      ostatni = 0;
+    } else ostatni = t;
+  });
+
+  // dwa palce: płynne powiększanie; jeden palec przy całej stronie: przesunięcie w bok = następna strona
+  let d0 = 0, k0 = 1, startX = null;
+  const dyst = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  pole.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) { d0 = dyst(e.touches); k0 = skala; startX = null; }
+    else if (e.touches.length === 1 && skala <= 1.05) startX = e.touches[0].clientX;
+  }, { passive: true });
+  pole.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && d0) {
+      e.preventDefault();
+      const r = pole.getBoundingClientRect();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left, cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      ustawSkale(k0 * dyst(e.touches) / d0, cx, cy);
+    }
+  }, { passive: false });
+  pole.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) d0 = 0;
+    if (startX !== null && e.changedTouches.length) {
+      const dx = e.changedTouches[0].clientX - startX;
+      if (Math.abs(dx) > 70) krok(dx < 0 ? 1 : -1);
+      startX = null;
+    }
+  });
+  window.addEventListener('resize', () => { if (s) pokazStrone(s); });
+
+  return { otworz, zamknij, otwarty: () => !el.hidden };
+})();
+
+$('#kam-mini').addEventListener('click', () => {
+  const s = stan.strony.find((x) => String(x.id) === $('#kam-mini').dataset.id) || stan.strony[stan.strony.length - 1];
+  Podglad.otworz(s);
+});
+
 const Kamera = (() => {
   const STABILNIE_MS = 900;   // tyle ramka musi stać w miejscu przed auto-zdjęciem
   const RUCH = 0.02;          // dopuszczalne drganie rogu między klatkami (ułamek kadru)
@@ -616,7 +720,7 @@ const Kamera = (() => {
 
   function petla() {
     if (!strumien) return;
-    if (!zajety && video.videoWidth) {
+    if (!zajety && !Podglad.otwarty() && video.videoWidth) {
       const vw = video.videoWidth, vh = video.videoHeight, s = 480 / Math.max(vw, vh);
       maly.width = Math.round(vw * s); maly.height = Math.round(vh * s);
       maly.getContext('2d', { willReadFrequently: true }).drawImage(video, 0, 0, maly.width, maly.height);
@@ -669,7 +773,7 @@ const Kamera = (() => {
     try {
       await dodajStrone(zr, hint);
       const s = stan.strony[stan.strony.length - 1];
-      $('#kam-mini').src = s.mini; $('#kam-mini').hidden = false;
+      $('#kam-mini').src = s.mini; $('#kam-mini').hidden = false; $('#kam-mini').dataset.id = s.id;
       licznik();
       toast(`Strona ${stan.strony.length} zapisana`, 1200);
     } catch (e) {

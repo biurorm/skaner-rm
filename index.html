@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div class="app">
@@ -186,11 +186,26 @@
   <input type="file" id="in-aparat" accept="image/*" capture="environment" hidden>
   <input type="file" id="in-galeria" accept="image/*" multiple hidden>
 
+  <!-- PODGLĄD STRONY (pełny ekran, bez edycji) -->
+  <div class="podglad" id="podglad" hidden>
+    <div class="podglad-gora">
+      <button class="pg-btn" id="pg-zamknij">✕ Zamknij</button>
+      <span id="pg-nr"></span>
+      <button class="pg-btn" id="pg-kadr">✂️ Kadr</button>
+    </div>
+    <div class="podglad-pole" id="pg-pole"><img id="pg-img" alt="Podgląd strony"></div>
+    <div class="podglad-dol">
+      <button class="pg-btn" id="pg-wstecz" aria-label="Poprzednia strona">◀</button>
+      <span class="pg-hint">Rozsuń palce albo dotknij dwa razy, żeby powiększyć</span>
+      <button class="pg-btn" id="pg-dalej" aria-label="Następna strona">▶</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
   <div class="zaslona" id="zaslona" hidden><div class="spinner"></div><div id="zaslona-tekst">Przetwarzam…</div></div>
 </div>
-<script src="skan.js?v=7"></script>
-<script src="pdf-rm.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="skan.js?v=8"></script>
+<script src="pdf-rm.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
