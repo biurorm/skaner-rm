@@ -5,7 +5,7 @@
 'use strict';
 
 // numer wersji widoczny w zielonym pasku; podbijać razem z ?v= w index.html i CACHE w sw.js
-const WERSJA = 6;
+const WERSJA = 7;
 
 const $ = (s) => document.querySelector(s);
 document.querySelectorAll('[data-wersja]').forEach((el) => { el.textContent = 'v' + WERSJA; });
@@ -511,10 +511,68 @@ const Kamera = (() => {
     video.srcObject = strumien;
     try { await video.play(); } catch (e) {}
     await new Promise((r) => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
+    await podkrec();
     $('#kam-pole').style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    toast(`Aparat: ${video.videoWidth} × ${video.videoHeight}`, 1800);
     ramka = null; stabilnaOd = 0; uzbrojony = true; brakOd = 0; wzorzec = null;
     rysujAuto(); licznik();
     petla();
+  }
+
+  // najwyższa rozdzielczość i ciągły autofokus, jakie daje aparat (iPhone domyślnie daje mniej)
+  async function podkrec() {
+    const tor = strumien && strumien.getVideoTracks()[0];
+    if (!tor || !tor.getCapabilities) return;
+    try {
+      const cap = tor.getCapabilities(), war = {};
+      if (cap.width && cap.height && cap.width.max > video.videoWidth) { war.width = { ideal: cap.width.max }; war.height = { ideal: cap.height.max }; }
+      if (cap.focusMode && cap.focusMode.includes('continuous')) war.advanced = [{ focusMode: 'continuous' }];
+      if (Object.keys(war).length) {
+        await tor.applyConstraints(war);
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } catch (e) {}
+  }
+
+  const czekajKlatke = () => new Promise((r) => {
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => r());
+    else setTimeout(r, 50);
+  });
+
+  // ostrość wycinka kartki: wariancja laplasjanu (im większa, tym ostrzejsze litery)
+  function ostrosc(c) {
+    const w = c.width, h = c.height, d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+    const g = new Float32Array(w * h);
+    for (let i = 0; i < g.length; i++) g[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
+    let s = 0, s2 = 0, n = 0;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x, l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w];
+      s += l; s2 += l * l; n++;
+    }
+    return n ? s2 / n - (s / n) ** 2 : 0;
+  }
+
+  // kilka kolejnych klatek w pełnej rozdzielczości, zostaje najostrzejsza (bez poruszenia i z trafionym fokusem)
+  async function najostrzejsza(hint, ile = 6) {
+    const vw = video.videoWidth, vh = video.videoHeight, sk = Math.min(1, 4032 / Math.max(vw, vh));
+    const best = Skan.plotno(vw * sk, vh * sk), bctx = best.getContext('2d');
+    bctx.imageSmoothingQuality = 'high';
+    let xs = [0.2, 0.8], ys = [0.2, 0.8];
+    if (hint) { xs = hint.map((p) => p[0]); ys = hint.map((p) => p[1]); }
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    // środek kartki (bez marginesów), w natywnej rozdzielczości wideo
+    const sx = (x0 + (x1 - x0) * 0.2) * vw, sy = (y0 + (y1 - y0) * 0.2) * vh;
+    const sw = Math.max(16, (x1 - x0) * 0.6 * vw), sh = Math.max(16, (y1 - y0) * 0.6 * vh);
+    const pw = Math.min(640, Math.round(sw)), ph = Math.max(16, Math.round(pw * sh / sw));
+    const probka = Skan.plotno(pw, ph), pctx = probka.getContext('2d', { willReadFrequently: true });
+    let wynik = -1;
+    for (let k = 0; k < ile; k++) {
+      if (k) await czekajKlatke();
+      pctx.drawImage(video, sx, sy, sw, sh, 0, 0, pw, ph);
+      const o = ostrosc(probka);
+      if (o > wynik) { wynik = o; bctx.drawImage(video, 0, 0, best.width, best.height); }
+    }
+    return best;
   }
 
   function zamknij() {
@@ -595,10 +653,14 @@ const Kamera = (() => {
   async function pstryk() {
     if (!strumien || zajety || !video.videoWidth) return;
     zajety = true;
-    const hint = ramka && ramka.map((p) => p.slice());
-    const vw = video.videoWidth, vh = video.videoHeight, sk = Math.min(1, 3000 / Math.max(vw, vh));
-    const zr = Skan.plotno(vw * sk, vh * sk);
-    const ctx = zr.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(video, 0, 0, zr.width, zr.height);
+    let hint = ramka && ramka.map((p) => p.slice());
+    status('Łapię ostrość…', true);
+    let zr = null;
+    // Android: prawdziwe zdjęcie z aparatu (pełna matryca); kadr inny niż podgląd, więc rogi szukamy od nowa
+    if (window.ImageCapture && strumien.getVideoTracks()[0]) {
+      try { zr = await Skan.wczytaj(await new ImageCapture(strumien.getVideoTracks()[0]).takePhoto()); hint = null; } catch (e) { zr = null; }
+    }
+    if (!zr) zr = await najostrzejsza(hint);
     $('#kam-blysk').classList.remove('blysk'); void $('#kam-blysk').offsetWidth; $('#kam-blysk').classList.add('blysk');
     if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {}
     uzbrojony = false; brakOd = 0; wzorzec = odcisk(zr);
@@ -658,9 +720,9 @@ $('#btn-jpg').addEventListener('click', () => {
 
 // ---------- PRZYCISKI GŁÓWNE ----------
 
-// główny przycisk: zwykły aparat telefonu (pełne 12 Mpx i obróbka iPhone'a), skan na żywo jako opcja
-$('#btn-aparat').addEventListener('click', () => $('#in-aparat').click());
-$('#btn-nazywo').addEventListener('click', () => Kamera.otworz());
+// główny przycisk: skan na żywo z ramką (najostrzejsza z kilku klatek w pełnej rozdzielczości); zwykły aparat jako zapas
+$('#btn-aparat').addEventListener('click', () => Kamera.otworz());
+$('#btn-nazywo').addEventListener('click', () => $('#in-aparat').click());
 $('#btn-galeria').addEventListener('click', () => $('#in-galeria').click());
 $('#btn-pdf').addEventListener('click', () => { stan.format = 'pdf'; otworzZapis(); });
 $('#in-aparat').addEventListener('change', async (e) => { await dodajPliki(e.target.files); e.target.value = ''; });
